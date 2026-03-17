@@ -4,12 +4,10 @@ This project publishes to npm automatically through GitHub Actions when a new Gi
 
 ## Release flow
 
-1. Update the version in `src/package.json`:
+1. Update the version in `package.json`:
 
 ```bash
-cd src
 npm version patch --no-git-tag-version
-cd ..
 ```
 
 2. Commit the version change:
@@ -35,7 +33,7 @@ When the tag is pushed, GitHub Actions publishes the package to npm automaticall
 
 ## Notes
 
-- The npm package lives in `src/`.
-- The publish workflow runs from `src/`.
+- The npm package manifest lives in the repository root.
+- The CLI entrypoint is `src/index.js`.
 - Replace `patch` with `minor` or `major` when needed.
 - The published package name is `@ricardohsmello/mongodb-cli-lab`.
