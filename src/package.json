@@ -1,0 +1,13 @@
+{
+  "name": "@ricardohsmello/mongodb-cli-lab",
+  "version": "1.0.0",
+  "description": "CLI to create a local MongoDB sharded cluster using Docker",
+  "bin": {
+    "mongodb-cli-lab": "./index.js"
+  },
+  "type": "module",
+  "dependencies": {
+    "commander": "^12.1.0",
+    "inquirer": "^9.3.8"
+  }
+}
