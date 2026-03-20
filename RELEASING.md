@@ -20,7 +20,7 @@ git commit -m "release: v1.0.6"
 3. Create the Git tag:
 
 ```bash
-git tag v1.0.6
+git tag v.1.0.6
 ```
 
 4. Push the branch and the tag:
