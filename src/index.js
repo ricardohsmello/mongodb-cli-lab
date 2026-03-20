@@ -6,14 +6,18 @@ import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { execFileSync } from "node:child_process";
-import { Command } from "commander";
 import inquirer from "inquirer";
+import {
+  buildQuickstartConfig,
+  configsMatch,
+  hasExplicitUpOptions,
+  resolveUpConfig
+} from "./lib/config.js";
 
 const DEFAULT_STORAGE_PATH = "./mongodb-cli-lab";
 const DEFAULT_PROJECT_NAME = "mongodb-cli-lab";
 const COMPOSE_PROJECT_NAME = sanitizeProjectName(DEFAULT_PROJECT_NAME);
 const INTERNAL_MONGO_PORT = 27017;
-const CONFIG_SERVER_MEMBERS = 3;
 const STATE_FILE_NAME = ".mongodb-cli-lab-state.json";
 const GLOBAL_STATE_DIR = path.join(os.homedir(), ".mongodb-cli-lab");
 let dockerComposeCommand = null;
@@ -25,24 +29,18 @@ const DOCS = {
   configServers: "https://www.mongodb.com/docs/manual/core/sharded-cluster-config-servers/",
   mongos: "https://www.mongodb.com/docs/manual/core/sharded-cluster-query-router/"
 };
-
-function validatePositiveInteger(label) {
-  return (value) => {
-    if (!Number.isInteger(value) || value < 1) {
-      return `${label} must be an integer greater than 0.`;
-    }
-
-    return true;
-  };
-}
-
-function validatePort(value) {
-  if (!Number.isInteger(value) || value < 1 || value > 65535) {
-    return "Port must be an integer between 1 and 65535.";
-  }
-
-  return true;
-}
+const BOOK_DEMO_DOCUMENTS = Object.freeze([
+  { title: "Clean Code", author: "Robert C. Martin", year: 2008, genre: "software", pages: 464, isbn: "9780132350884" },
+  { title: "Designing Data-Intensive Applications", author: "Martin Kleppmann", year: 2017, genre: "databases", pages: 616, isbn: "9781449373320" },
+  { title: "Refactoring", author: "Martin Fowler", year: 1999, genre: "software", pages: 448, isbn: "9780201485677" },
+  { title: "MongoDB: The Definitive Guide", author: "Kristina Chodorow", year: 2013, genre: "databases", pages: 432, isbn: "9781449344689" },
+  { title: "Patterns of Enterprise Application Architecture", author: "Martin Fowler", year: 2002, genre: "architecture", pages: 560, isbn: "9780321127426" },
+  { title: "Release It!", author: "Michael T. Nygard", year: 2007, genre: "operations", pages: 368, isbn: "9780978739218" },
+  { title: "The Pragmatic Programmer", author: "Andrew Hunt", year: 1999, genre: "software", pages: 352, isbn: "9780201616224" },
+  { title: "Building Microservices", author: "Sam Newman", year: 2015, genre: "architecture", pages: 280, isbn: "9781491950357" },
+  { title: "Effective Java", author: "Joshua Bloch", year: 2018, genre: "software", pages: 416, isbn: "9780134685991" },
+  { title: "Site Reliability Engineering", author: "Betsy Beyer", year: 2016, genre: "operations", pages: 552, isbn: "9781491929124" }
+]);
 
 function sleep(milliseconds) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds);
@@ -50,166 +48,6 @@ function sleep(milliseconds) {
 
 function printDocsLink(label, url) {
   console.log(`Docs: ${label} -> ${url}`);
-}
-
-function normalizeClusterConfig(answers) {
-  return {
-    shardCount: answers.shardCount,
-    replicaSetMembers: answers.replicaSetMembers,
-    mongodbVersion: answers.mongodbVersion,
-    mongosPort: answers.mongosPort,
-    storagePath: path.resolve(process.cwd(), answers.storagePath),
-    configServerReplicaSet: "configReplSet",
-    configServerMembers: CONFIG_SERVER_MEMBERS
-  };
-}
-
-async function promptClusterOptions() {
-  console.log("\nMongoDB CLI Lab Setup\n");
-  printDocsLink("Sharding overview", DOCS.sharding);
-  printDocsLink("Replication overview", DOCS.replication);
-  printDocsLink("Config servers", DOCS.configServers);
-  printDocsLink("mongos router", DOCS.mongos);
-  console.log();
-
-  const answers = await inquirer.prompt([
-    {
-      type: "list",
-      name: "shardCount",
-      message: "How many shards do you want?",
-      choices: [
-        { name: "1 shard", value: "1" },
-        { name: "2 shards", value: "2" },
-        { name: "3 shards", value: "3" },
-        { name: "4 shards", value: "4" },
-        { name: "Custom", value: "custom" },
-        { name: "Back", value: "back" }
-      ],
-      default: "2"
-    },
-    {
-      type: "input",
-      name: "customShardCount",
-      message: "Enter the number of shards:",
-      when: (answers) => answers.shardCount === "custom",
-      validate: (value) =>
-        value.trim().toLowerCase() === "back" ||
-        validatePositiveInteger("Shard count")(Number(value))
-    },
-    {
-      type: "list",
-      name: "replicaSetMembers",
-      message: "How many replica set members per shard?",
-      choices: [
-        { name: "1 member", value: "1" },
-        { name: "3 members", value: "3" },
-        { name: "5 members", value: "5" },
-        { name: "Custom", value: "custom" },
-        { name: "Back", value: "back" }
-      ],
-      default: "3"
-    },
-    {
-      type: "input",
-      name: "customReplicaSetMembers",
-      message: "Enter replica set members per shard:",
-      when: (answers) => answers.replicaSetMembers === "custom",
-      validate: (value) =>
-        value.trim().toLowerCase() === "back" ||
-        validatePositiveInteger("Replica set members")(Number(value))
-    },
-    {
-      type: "list",
-      name: "mongodbVersion",
-      message: "Which MongoDB version should be used?",
-      choices: ["8.0", "7.0", "6.0", "5.0", "Custom", "Back"],
-      default: "7.0"
-    },
-    {
-      type: "input",
-      name: "customMongodbVersion",
-      message: "Enter the MongoDB Docker tag/version:",
-      when: (answers) => answers.mongodbVersion === "Custom",
-      default: "7.0",
-      validate: (value) =>
-        value.trim().toLowerCase() === "back" || value.trim() ? true : "Version cannot be empty."
-    },
-    {
-      type: "list",
-      name: "mongosPort",
-      message: "Which port should mongos expose?",
-      choices: [
-        { name: "27017", value: "27017" },
-        { name: "28000", value: "28000" },
-        { name: "30000", value: "30000" },
-        { name: "Custom", value: "custom" },
-        { name: "Back", value: "back" }
-      ],
-      default: "28000"
-    },
-    {
-      type: "input",
-      name: "customMongosPort",
-      message: "Enter the mongos port:",
-      when: (answers) => answers.mongosPort === "custom",
-      validate: (value) =>
-        value.trim().toLowerCase() === "back" || validatePort(Number(value))
-    },
-    {
-      type: "list",
-      name: "storagePath",
-      message: "Where should the cluster files be stored?",
-      choices: [
-        { name: `Current folder (${DEFAULT_STORAGE_PATH})`, value: DEFAULT_STORAGE_PATH },
-        { name: "/tmp/mongodb-cli-lab", value: "/tmp/mongodb-cli-lab" },
-        { name: "Custom", value: "custom" },
-        { name: "Back", value: "back" }
-      ],
-      default: DEFAULT_STORAGE_PATH
-    },
-    {
-      type: "input",
-      name: "customStoragePath",
-      message: "Enter the cluster storage path:",
-      when: (answers) => answers.storagePath === "custom",
-      default: DEFAULT_STORAGE_PATH,
-      validate: (value) =>
-        value.trim().toLowerCase() === "back" || value.trim() ? true : "Storage path cannot be empty."
-    }
-  ]);
-
-  if (
-    answers.shardCount === "back" ||
-    answers.replicaSetMembers === "back" ||
-    answers.mongodbVersion === "Back" ||
-    answers.mongosPort === "back" ||
-    answers.storagePath === "back" ||
-    answers.customShardCount?.trim?.().toLowerCase() === "back" ||
-    answers.customReplicaSetMembers?.trim?.().toLowerCase() === "back" ||
-    answers.customMongodbVersion?.trim?.().toLowerCase() === "back" ||
-    answers.customMongosPort?.trim?.().toLowerCase() === "back" ||
-    answers.customStoragePath?.trim?.().toLowerCase() === "back"
-  ) {
-    return null;
-  }
-
-  return normalizeClusterConfig({
-    shardCount: answers.shardCount === "custom" ? Number(answers.customShardCount) : Number(answers.shardCount),
-    replicaSetMembers:
-      answers.replicaSetMembers === "custom"
-        ? Number(answers.customReplicaSetMembers)
-        : Number(answers.replicaSetMembers),
-    mongodbVersion:
-      answers.mongodbVersion === "Custom"
-        ? answers.customMongodbVersion.trim()
-        : answers.mongodbVersion,
-    mongosPort:
-      answers.mongosPort === "custom" ? Number(answers.customMongosPort) : Number(answers.mongosPort),
-    storagePath:
-      answers.storagePath === "custom"
-        ? answers.customStoragePath.trim()
-        : answers.storagePath
-  });
 }
 
 function buildTopology(config) {
@@ -1377,28 +1215,6 @@ function getRecommendedBatchSize(insertCount) {
   return 5000;
 }
 
-function buildBooksBatchDocuments(insertCount, startIndex = 0) {
-  const seedBooks = buildBooksDemoDocuments();
-  const documents = [];
-
-  for (let relativeIndex = 0; relativeIndex < insertCount; relativeIndex += 1) {
-    const index = startIndex + relativeIndex;
-    const base = seedBooks[index % seedBooks.length];
-    documents.push({
-      _id: index + 1,
-      title: `${base.title} #${index + 1}`,
-      author: base.author,
-      year: base.year + (index % 5),
-      genre: base.genre,
-      pages: base.pages + (index % 20),
-      isbn: `${base.isbn}-${index + 1}`,
-      copyNumber: index + 1
-    });
-  }
-
-  return documents;
-}
-
 function insertDocumentsInBatches(state, options) {
   const {
     databaseName,
@@ -1443,18 +1259,7 @@ function buildSampleDocuments(fieldName, totalCount, initialOffset) {
 }
 
 function buildBooksDataset(totalCount, initialOffset) {
-  const seedBooks = [
-    { title: "Clean Code", author: "Robert C. Martin", year: 2008, genre: "software", pages: 464, isbn: "9780132350884" },
-    { title: "Designing Data-Intensive Applications", author: "Martin Kleppmann", year: 2017, genre: "databases", pages: 616, isbn: "9781449373320" },
-    { title: "Refactoring", author: "Martin Fowler", year: 1999, genre: "software", pages: 448, isbn: "9780201485677" },
-    { title: "MongoDB: The Definitive Guide", author: "Kristina Chodorow", year: 2013, genre: "databases", pages: 432, isbn: "9781449344689" },
-    { title: "Patterns of Enterprise Application Architecture", author: "Martin Fowler", year: 2002, genre: "architecture", pages: 560, isbn: "9780321127426" },
-    { title: "Release It!", author: "Michael T. Nygard", year: 2007, genre: "operations", pages: 368, isbn: "9780978739218" },
-    { title: "The Pragmatic Programmer", author: "Andrew Hunt", year: 1999, genre: "software", pages: 352, isbn: "9780201616224" },
-    { title: "Building Microservices", author: "Sam Newman", year: 2015, genre: "architecture", pages: 280, isbn: "9781491950357" },
-    { title: "Effective Java", author: "Joshua Bloch", year: 2018, genre: "software", pages: 416, isbn: "9780134685991" },
-    { title: "Site Reliability Engineering", author: "Betsy Beyer", year: 2016, genre: "operations", pages: 552, isbn: "9781491929124" }
-  ];
+  const seedBooks = ${JSON.stringify(BOOK_DEMO_DOCUMENTS)};
 
   const generated = [];
   for (let relativeIndex = 0; relativeIndex < totalCount; relativeIndex += 1) {
@@ -1510,40 +1315,7 @@ function buildSampleDocuments(shardKeyField, insertCount, startIndex = 0) {
 }
 
 function buildBooksDemoDocuments() {
-  return [
-    { title: "Clean Code", author: "Robert C. Martin", year: 2008, genre: "software", pages: 464, isbn: "9780132350884" },
-    { title: "Designing Data-Intensive Applications", author: "Martin Kleppmann", year: 2017, genre: "databases", pages: 616, isbn: "9781449373320" },
-    { title: "Refactoring", author: "Martin Fowler", year: 1999, genre: "software", pages: 448, isbn: "9780201485677" },
-    { title: "MongoDB: The Definitive Guide", author: "Kristina Chodorow", year: 2013, genre: "databases", pages: 432, isbn: "9781449344689" },
-    { title: "Patterns of Enterprise Application Architecture", author: "Martin Fowler", year: 2002, genre: "architecture", pages: 560, isbn: "9780321127426" },
-    { title: "Release It!", author: "Michael T. Nygard", year: 2007, genre: "operations", pages: 368, isbn: "9780978739218" },
-    { title: "The Pragmatic Programmer", author: "Andrew Hunt", year: 1999, genre: "software", pages: 352, isbn: "9780201616224" },
-    { title: "Building Microservices", author: "Sam Newman", year: 2015, genre: "architecture", pages: 280, isbn: "9781491950357" },
-    { title: "Effective Java", author: "Joshua Bloch", year: 2018, genre: "software", pages: 416, isbn: "9780134685991" },
-    { title: "Site Reliability Engineering", author: "Betsy Beyer", year: 2016, genre: "operations", pages: 552, isbn: "9781491929124" }
-  ];
-}
-
-function buildBooksDemoDataset(insertCount, startIndex = 0) {
-  const seedBooks = buildBooksDemoDocuments();
-  const documents = [];
-
-  for (let relativeIndex = 0; relativeIndex < insertCount; relativeIndex += 1) {
-    const index = startIndex + relativeIndex;
-    const base = seedBooks[index % seedBooks.length];
-    documents.push({
-      _id: index + 1,
-      title: `${base.title} #${index + 1}`,
-      author: base.author,
-      year: base.year + (index % 5),
-      genre: base.genre,
-      pages: base.pages + (index % 20),
-      isbn: `${base.isbn}-${index + 1}`,
-      copyNumber: index + 1
-    });
-  }
-
-  return documents;
+  return BOOK_DEMO_DOCUMENTS;
 }
 
 function getCollectionDistribution(state, databaseName, collectionName) {
@@ -1658,11 +1430,6 @@ function printCollectionDistribution(distribution) {
   console.log(
     "\nNote: distribution is not guaranteed to be perfectly even. It depends on the shard key, value spread, chunk splits, and balancer timing.\n"
   );
-}
-
-function getShardMemberServiceName(state, shardReplicaSet) {
-  const shard = state.topology.shards.find((entry) => entry.replicaSet === shardReplicaSet);
-  return shard?.members[0]?.serviceName ?? null;
 }
 
 function getAvailableShardMemberServiceName(state, shardReplicaSet) {
@@ -1807,6 +1574,78 @@ function printShardDataPresence(databaseName, collectionName, shardPresence) {
   }
 
   console.log("\nAll shards currently have at least some data for this collection.\n");
+}
+
+function printQuickstartPlan(config) {
+  console.log("\nQuickstart mode\n");
+  console.log("This command will:");
+  console.log(`- create a ${config.shardCount}-shard cluster`);
+  console.log(`- use ${config.replicaSetMembers} replica set members per shard`);
+  console.log(`- run MongoDB ${config.mongodbVersion}`);
+  console.log(`- expose mongos on localhost:${config.mongosPort}`);
+  console.log("- create the demo collection library.books");
+  console.log('- shard the collection by { "_id": "hashed" }');
+  console.log("- insert 500 sample documents");
+  console.log("- show how documents were distributed across shards\n");
+}
+
+function printQuickstartSummary(result, inserted, distribution) {
+  console.log("\nQuickstart demo completed\n");
+  console.log(`Namespace: ${result.namespace}`);
+  console.log(`Shard key: ${JSON.stringify(result.shardKey)}`);
+  console.log(`Action: ${result.actionTaken}`);
+  console.log(`Documents inserted: ${inserted}\n`);
+  printCollectionDistribution(distribution);
+  console.log("Try next:");
+  console.log("- mongodb-cli-lab status");
+  console.log("- mongodb-cli-lab");
+  console.log();
+}
+
+async function runQuickstartDemo(state) {
+  const databaseName = "library";
+  const collectionName = "books";
+  const insertCount = 500;
+
+  printStep(
+    1,
+    3,
+    "Create demo collection",
+    "Preparing a small sharded collection so the cluster is immediately useful for learning."
+  );
+  const result = shardCollection(state, {
+    databaseName,
+    collectionName,
+    shardKeyField: "_id",
+    shardKeyMode: "hashed",
+    documents: [],
+    resetCollection: true,
+    skipInsert: true
+  });
+
+  printStep(
+    2,
+    3,
+    "Insert sample documents",
+    "Writing 500 example documents into library.books."
+  );
+  printInsertPlan(`${databaseName}.${collectionName}`, insertCount);
+  const inserted = insertDocumentsInBatches(state, {
+    databaseName,
+    collectionName,
+    shardKeyField: "_id",
+    insertCount,
+    seedMode: "books-demo"
+  });
+
+  printStep(
+    3,
+    3,
+    "Inspect distribution",
+    "Checking how MongoDB distributed the documents across shards."
+  );
+  const distribution = getCollectionDistribution(state, databaseName, collectionName);
+  printQuickstartSummary(result, inserted, distribution);
 }
 
 async function promptExistingCollection(overview) {
@@ -2391,23 +2230,20 @@ async function promptConfigReuse(existingState) {
   return action;
 }
 
-async function createStateFromAnswers() {
-  const config = await promptClusterOptions();
-  if (!config) {
-    return null;
-  }
-
-  const confirmed = await confirmAction(
-    [
-      "Create cluster with this topology?",
-      `Shards: ${config.shardCount}`,
-      `Members per shard: ${config.replicaSetMembers}`,
-      `MongoDB version: ${config.mongodbVersion}`,
-      `mongos port: ${config.mongosPort}`,
-      `Storage path: ${config.storagePath}`
-    ].join("\n"),
-    true
-  );
+async function createStateFromConfig(config, options = {}) {
+  const confirmed = options.confirm === false
+    ? true
+    : await confirmAction(
+      [
+        "Create cluster with this topology?",
+        `Shards: ${config.shardCount}`,
+        `Members per shard: ${config.replicaSetMembers}`,
+        `MongoDB version: ${config.mongodbVersion}`,
+        `mongos port: ${config.mongosPort}`,
+        `Storage path: ${config.storagePath}`
+      ].join("\n"),
+      true
+    );
 
   if (!confirmed) {
     return null;
@@ -2426,6 +2262,52 @@ async function createStateFromAnswers() {
   return state;
 }
 
+async function resolveStateForUp(options = {}) {
+  const explicitOptions = hasExplicitUpOptions(options);
+  let state = await loadState();
+
+  if (state && !explicitOptions && !options.quickstart) {
+    const action = await promptConfigReuse(state);
+
+    if (action === "cancel") {
+      return null;
+    }
+
+    if (action === "reuse") {
+      console.log(`\nUsing existing cluster config from ${state.config.storagePath}\n`);
+      return state;
+    }
+
+    await fs.rm(state.config.storagePath, { recursive: true, force: true });
+    state = null;
+  }
+
+  const desiredConfig = options.quickstart
+    ? buildQuickstartConfig(options)
+    : await resolveUpConfig(options);
+
+  if (!state) {
+    return createStateFromConfig(desiredConfig, { confirm: !explicitOptions && !options.quickstart });
+  }
+
+  if (configsMatch(state.config, desiredConfig)) {
+    console.log(`\nUsing existing cluster config from ${state.config.storagePath}\n`);
+    return state;
+  }
+
+  if (options.force) {
+    await fs.rm(state.config.storagePath, { recursive: true, force: true });
+    return createStateFromConfig(desiredConfig, { confirm: false });
+  }
+
+  throw new Error(
+    [
+      `A different cluster config already exists at ${state.config.storagePath}.`,
+      "Run 'mongodb-cli-lab clean' first or rerun the command with '--force'."
+    ].join(" ")
+  );
+}
+
 async function requireState() {
   const state = await loadState();
 
@@ -2436,30 +2318,11 @@ async function requireState() {
   return state;
 }
 
-async function runUp() {
+async function runUp(options = {}) {
   ensureDockerAvailable();
-
-  let state = await loadState();
-  if (state) {
-    const action = await promptConfigReuse(state);
-
-    if (action === "cancel") {
-      return;
-    }
-
-    if (action === "replace") {
-      await fs.rm(state.config.storagePath, { recursive: true, force: true });
-      state = null;
-    }
-  }
-
+  const state = await resolveStateForUp(options);
   if (!state) {
-    state = await createStateFromAnswers();
-    if (!state) {
-      return;
-    }
-  } else {
-    console.log(`\nUsing existing cluster config from ${state.config.storagePath}\n`);
+    return null;
   }
 
   await bringUpCluster(state);
@@ -2469,9 +2332,11 @@ async function runUp() {
   console.log("Connection string:");
   console.log(`mongodb://localhost:${state.config.mongosPort}`);
   console.log("\nIf initialization is interrupted, rerunning 'up' will retry safely.\n");
+  return state;
 }
 
 async function runDown() {
+  ensureDockerAvailable();
   const state = await requireState();
   printStep(1, 1, "Stop cluster", "Stopping the running Docker containers for this lab.");
   runCompose(state, ["down"]);
@@ -2500,6 +2365,7 @@ async function runStatus() {
 }
 
 async function runClean() {
+  ensureDockerAvailable();
   const state = await requireState();
 
   printStep(1, 2, "Stop containers", "Stopping and removing containers, networks, and volumes for this lab.");
@@ -2655,40 +2521,28 @@ async function interactiveMainMenu() {
   }
 }
 
-function handleAction(action) {
-  action().catch((error) => {
-    console.error(`\nError: ${error.message}\n`);
-    process.exitCode = 1;
-  });
+async function runQuickstart(options = {}) {
+  const config = buildQuickstartConfig(options);
+  printQuickstartPlan(config);
+  const confirmed = await confirmAction("Proceed with quickstart setup and demo?", true);
+  if (!confirmed) {
+    console.log("\nQuickstart cancelled.\n");
+    return;
+  }
+
+  const state = await runUp({ ...options, quickstart: true });
+  if (!state) {
+    return;
+  }
+
+  await runQuickstartDemo(state);
 }
 
-const program = new Command();
-
-program
-  .name("mongodb-cli-lab")
-  .description("CLI to spin up a local MongoDB sharded cluster with Docker")
-  .version("0.0.1");
-
-program
-  .command("up")
-  .description("Create and start a local MongoDB sharded cluster")
-  .action(() => handleAction(runUp));
-
-program
-  .command("down")
-  .description("Stop the running cluster")
-  .action(() => handleAction(runDown));
-
-program
-  .command("status")
-  .description("Show cluster status")
-  .action(() => handleAction(runStatus));
-
-program
-  .command("clean")
-  .description("Remove containers, volumes, and generated files")
-  .action(() => handleAction(runClean));
-
-program.action(() => handleAction(interactiveMainMenu));
-
-program.parseAsync(process.argv);
+export {
+  interactiveMainMenu,
+  runClean,
+  runDown,
+  runQuickstart,
+  runStatus,
+  runUp
+};

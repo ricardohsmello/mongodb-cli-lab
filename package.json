@@ -3,7 +3,7 @@
   "version": "1.0.1",
   "description": "CLI to create a local MongoDB sharded cluster using Docker",
   "bin": {
-    "mongodb-cli-lab": "./src/index.js"
+    "mongodb-cli-lab": "./src/cli.js"
   },
   "type": "module",
   "dependencies": {

@@ -1,47 +1,116 @@
 # MongoDB CLI Lab
 
-`MongoDB CLI Lab` is an npm CLI for learning and testing MongoDB sharding in a local Docker environment.
+`mongodb-cli-lab` is a CLI for creating and managing a local MongoDB sharded cluster with Docker.
 
-It helps you create a sharded cluster automatically so you can focus on understanding the workflow instead of setting everything up by hand.
+It is intended for tests, local development, demos, and learning. It is not a production deployment tool.
 
-With the CLI, you can:
-
-- create a local MongoDB sharded cluster
-- choose the number of shards
-- choose the number of replica set members per shard
-- choose the MongoDB version
-- define the `mongos` port
-- create collections
-- enable sharding for collections
-- run simple experiments to understand shard distribution
-
-This project is intended for study, demos, and local experiments. It is a learning lab, not a production-ready solution.
-
-## Prerequisites
-
-Before running the CLI, you need:
-
-- Docker installed
-- Docker running
-
-## How to run
-
-1. Install the package:
+## Installation
 
 ```bash
-npm i @ricardohsmello/mongodb-cli-lab
+npm install -g @ricardohsmello/mongodb-cli-lab
 ```
 
-2. Run the CLI:
+Or run it directly with `npx`:
 
 ```bash
-npx mongodb-cli-lab
+npx @ricardohsmello/mongodb-cli-lab
 ```
 
-The command opens an interactive flow where you can create the cluster, configure shards, and work with sharded collections.
+## Two Ways To Use It
 
-## Important
+### 1. Interactive mode
 
-This tool was built for educational purposes only.
+Run the CLI with no command to open the interactive menu:
 
-It should not be used in production as-is. Any production usage would require a proper technical review, operational hardening, and validation by whoever decides to adopt it.
+```bash
+mongodb-cli-lab
+```
+
+This mode is useful when you want to explore the lab step by step.
+
+### 2. Command mode
+
+Run commands directly to create and manage the cluster without going through the menu.
+
+Available commands:
+
+```bash
+mongodb-cli-lab up
+mongodb-cli-lab status
+mongodb-cli-lab down
+mongodb-cli-lab clean
+mongodb-cli-lab quickstart
+```
+
+## Start A Cluster With Commands
+
+Example:
+
+```bash
+mongodb-cli-lab up \
+  --shards 2 \
+  --replicas 3 \
+  --mongodb-version 8.2 \
+  --port 28000
+```
+
+This starts a cluster with:
+
+- 2 shards
+- 3 replica set members per shard
+- MongoDB `8.2`
+- `mongos` exposed on port `28000`
+
+## Quickstart
+
+`quickstart` creates a cluster with default values and also builds a small sharding demo automatically.
+
+It:
+
+- starts the cluster
+- creates `library.books`
+- shards the collection with `{ _id: "hashed" }`
+- inserts 500 sample documents
+- shows distribution across shards
+
+Run:
+
+```bash
+mongodb-cli-lab quickstart
+```
+
+## Local Development
+
+If you are running the project from source:
+
+```bash
+node src/cli.js
+```
+
+Example:
+
+```bash
+node src/cli.js up \
+  --shards 2 \
+  --replicas 3 \
+  --mongodb-version 8.2 \
+  --port 28000
+```
+
+Other commands:
+
+```bash
+node src/cli.js status
+node src/cli.js down
+node src/cli.js clean
+node src/cli.js quickstart
+```
+
+## Command Summary
+
+- `up`: create and start the cluster
+- `status`: show current cluster status
+- `down`: stop the cluster
+- `clean`: remove containers, volumes, and generated files
+- `quickstart`: start the cluster and build a ready-to-use sharding demo
+
