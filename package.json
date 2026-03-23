@@ -1,6 +1,6 @@
 {
   "name": "@ricardohsmello/mongodb-cli-lab",
-  "version": "2.0.1",
+  "version": "2.0.2",
   "description": "CLI to create a local MongoDB sharded cluster using Docker",
   "bin": {
     "mongodb-cli-lab": "./src/cli.js"

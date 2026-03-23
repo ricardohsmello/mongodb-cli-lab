@@ -1,166 +1,119 @@
-# MongoDB CLI Lab
+# mongodb-cli-lab
 
-`mongodb-cli-lab` is a Node.js CLI to create local MongoDB labs with Docker.
+[![npm version](https://img.shields.io/npm/v/@ricardohsmello/mongodb-cli-lab)](https://www.npmjs.com/package/@ricardohsmello/mongodb-cli-lab)
+[![npm downloads](https://img.shields.io/npm/dm/@ricardohsmello/mongodb-cli-lab)](https://www.npmjs.com/package/@ricardohsmello/mongodb-cli-lab)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Node.js](https://img.shields.io/badge/node-%3E%3D18-brightgreen)](https://nodejs.org)
 
-NPM package: [@ricardohsmello/mongodb-cli-lab](https://www.npmjs.com/package/@ricardohsmello/mongodb-cli-lab)
+> A Node.js CLI to spin up local MongoDB labs with Docker — standalone, replica set, sharded cluster, and MongoDB Search.
 
-It supports:
-- `standalone`
-- `replica-set`
-- `sharded`
+Intended for local development, demos, testing, and learning. **Not for production use.**
+
+---
+
+## Table of Contents
+
+- [Features](#features)
+- [Prerequisites](#prerequisites)
+- [Installation](#installation)
+- [Usage](#usage)
+  - [Interactive Menu](#interactive-menu)
+  - [Commands](#commands)
+  - [Options](#options)
+- [Examples](#examples)
+  - [Standalone](#standalone)
+  - [Replica Set](#replica-set)
+  - [Sharded Cluster](#sharded-cluster)
+- [Help](#help)
+
+---
+
+## Features
+
+- Interactive menu to create and manage labs
+- Standalone MongoDB node
+- Replica set
+- Sharded cluster
 - MongoDB Search on `standalone` and `replica-set`
+- Quickstart scripts for sharding and Search flows
+- Sample database loading (`--sample-databases`)
 
-It is intended for local development, demos, testing, and learning. It is not intended for production use.
-
-## What This CLI Does
-
-With this CLI you can:
-- open an interactive menu to create and manage labs
-- create a standalone MongoDB node
-- create a replica set
-- create a sharded cluster
-- enable MongoDB Search on standalone or replica-set labs
-- run a sharding quickstart for sharded clusters
-- run a Search quickstart for standalone or replica-set labs with Search enabled
+---
 
 ## Prerequisites
 
-- Docker installed and running
-- Node.js installed
+- [Docker](https://www.docker.com/) installed and running
 
-For MongoDB Search flows, use MongoDB `8.2`.
+---
 
 ## Installation
 
-Install globally:
+Install globally via npm:
 
 ```bash
 npm install -g @ricardohsmello/mongodb-cli-lab
 ```
 
-Or run from the project source:
+Or run directly from source:
 
 ```bash
 node src/cli.js
 ```
 
-## Start With The Interactive Menu
+---
 
-To open the interactive menu:
+## Usage
 
-```bash
-npx mongodb-cli-lab
-```
+### Interactive Menu
 
-Or, if you are running from source:
+Launch the interactive menu to set up and manage your lab:
 
 ```bash
-node src/cli.js
+mongodb-cli-lab
 ```
 
-This opens the main interactive menu, where you can:
-- set up a cluster
-- open the Search lab
-- work with data and sharding
-- manage the cluster
+From the menu you can:
+- Set up a cluster (standalone, replica set, or sharded)
+- Open the Search lab
+- Work with data and sharding
+- Manage the cluster lifecycle
 
-## Ready-To-Run Commands
+### Commands
 
-These commands run directly without opening the full interactive menu.
+| Command                    | Description                                      |
+|---------------------------|--------------------------------------------------|
+| `mongodb-cli-lab`         | Open the interactive menu                        |
+| `mongodb-cli-lab up`      | Start a lab with the given topology and options  |
+| `mongodb-cli-lab status`  | Show the status of the running lab               |
+| `mongodb-cli-lab down`    | Stop the running lab                             |
+| `mongodb-cli-lab clean`   | Remove all lab containers and volumes            |
+| `mongodb-cli-lab quickstart` | Run a quickstart script for the given topology |
 
-### Main Commands
+### Options
 
-```bash
-node src/cli.js up
-node src/cli.js status
-node src/cli.js down
-node src/cli.js clean
-node src/cli.js quickstart
-```
+| Flag                          | Values                                      | Description                                              |
+|-------------------------------|---------------------------------------------|----------------------------------------------------------|
+| `--topology`                  | `standalone`, `replica-set`, `sharded`      | MongoDB topology to create                               |
+| `--mongodb-version`           | e.g. `8.2`                                  | MongoDB Docker image version                             |
+| `--port`                      | e.g. `28000`                                | Host port to expose                                      |
+| `--replicas`                  | integer                                     | Members in `replica-set`; members per shard in `sharded` |
+| `--shards`                    | integer                                     | Number of shards (only for `sharded`)                    |
+| `--search`                    | —                                           | Enable MongoDB Search (only for `standalone`/`replica-set`) |
+| `--sample-databases`          | comma-separated names or `all`              | Load sample databases after setup                        |
 
-### Search Commands
+---
 
-```bash
-node src/cli.js search up
-node src/cli.js search status
-node src/cli.js search import --databases sample_mflix
-node src/cli.js search quickstart
-```
-
-### Commands You Will Probably Use Most
-
-Open the interactive menu:
-
-```bash
-node src/cli.js
-```
-
-Run a sharded cluster quickstart:
-
-```bash
-node src/cli.js quickstart --topology sharded --shards 2 --replicas 3 --mongodb-version 8.2 --port 28000
-```
-
-Run a replica set with Search quickstart:
-
-```bash
-node src/cli.js quickstart --topology replica-set --replicas 3 --search --mongodb-version 8.2 --port 28000
-```
-
-Start Search services or Search flow directly:
-
-```bash
-node src/cli.js search up
-node src/cli.js search quickstart
-```
-
-## Full Command-Line Options
-
-The main cluster creation command is:
-
-```bash
-mongodb-cli-lab up [options]
-```
-
-Available options:
-
-```bash
---topology <type>
---shards <number>
---replicas <number>
--m, --mongodb-version <tag>
---port <number>
---search
---sample-databases <names>
---search-mongod-port <number>
---search-port <number>
---metrics-port <number>
---storage-path <path>
---force
-```
-
-### Important Rules
-
-- `--topology` can be `standalone`, `replica-set`, or `sharded`
-- `--shards` is only for `sharded`
-- `--replicas` means:
-  - number of members in `replica-set`
-  - number of members per shard in `sharded`
-- `--search` works only with `standalone` and `replica-set`
-- Search flows should use MongoDB `8.2`
-- `--sample-databases <names>` accepts comma-separated names or `all`
-
-## Examples By Topology
+## Examples
 
 ### Standalone
 
-Standalone without Search:
+Without Search:
 
 ```bash
 mongodb-cli-lab up --topology standalone --mongodb-version 8.2 --port 28000
 ```
 
-Standalone with Search:
+With Search:
 
 ```bash
 mongodb-cli-lab up --topology standalone --search --mongodb-version 8.2 --port 28000
@@ -168,19 +121,19 @@ mongodb-cli-lab up --topology standalone --search --mongodb-version 8.2 --port 2
 
 ### Replica Set
 
-Replica set without Search:
+Without Search:
 
 ```bash
 mongodb-cli-lab up --topology replica-set --replicas 3 --mongodb-version 8.2 --port 28000
 ```
 
-Replica set with Search:
+With Search:
 
 ```bash
 mongodb-cli-lab up --topology replica-set --replicas 3 --search --mongodb-version 8.2 --port 28000
 ```
 
-Replica set with Search quickstart:
+Search quickstart:
 
 ```bash
 mongodb-cli-lab quickstart --topology replica-set --replicas 3 --search --mongodb-version 8.2 --port 28000
@@ -188,87 +141,29 @@ mongodb-cli-lab quickstart --topology replica-set --replicas 3 --search --mongod
 
 ### Sharded Cluster
 
-Sharded cluster:
+Basic:
 
 ```bash
 mongodb-cli-lab up --topology sharded --shards 2 --replicas 3 --mongodb-version 8.2 --port 28000
 ```
 
-Sharded cluster with sample databases:
+With sample databases:
 
 ```bash
 mongodb-cli-lab up --topology sharded --shards 2 --replicas 3 --mongodb-version 8.2 --port 28000 --sample-databases all
 ```
 
-Sharded cluster quickstart:
+Sharding quickstart:
 
 ```bash
 mongodb-cli-lab quickstart --topology sharded --shards 2 --replicas 3 --mongodb-version 8.2 --port 28000
 ```
 
-## Search Commands
+> **Note:** MongoDB Search is only supported on `standalone` and `replica-set` topologies.
 
-Search commands are grouped under:
-
-```bash
-mongodb-cli-lab search
-```
-
-Available commands:
-
-```bash
-mongodb-cli-lab search up
-mongodb-cli-lab search status
-mongodb-cli-lab search import --databases sample_airbnb,sample_mflix
-mongodb-cli-lab search quickstart
-```
-
-### Search Restrictions
-
-- Search works only with `standalone` and `replica-set`
-- Search flows should use MongoDB `8.2`
-- Search is not supported on `sharded` in this CLI
-
-### Search Quickstart
-
-This command:
-
-```bash
-mongodb-cli-lab search quickstart
-```
-
-does the following:
-- ensures Search is enabled
-- restores `sample_mflix`
-- creates the `default` Search index on `sample_mflix.movies`
-- runs a sample `$search` query for `"baseball"`
-
-## Sharding Quickstart
-
-This command:
-
-```bash
-mongodb-cli-lab quickstart --topology sharded --shards 2 --replicas 3 --mongodb-version 8.2 --port 28000
-```
-
-does the following:
-- creates a sharded cluster
-- creates the demo collection `library.books`
-- shards the collection using `{ "_id": "hashed" }`
-- inserts sample documents
-- shows distribution across shards
-
-## Lifecycle Commands
-
-```bash
-mongodb-cli-lab status
-mongodb-cli-lab down
-mongodb-cli-lab clean
-```
+---
 
 ## Help
-
-To inspect the CLI help:
 
 ```bash
 mongodb-cli-lab --help
