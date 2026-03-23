@@ -67,6 +67,22 @@ function addUpOptions(command) {
     .option("--force", "replace an existing saved cluster config when it differs");
 }
 
+function addSearchUpOptions(command) {
+  return command
+    .option("--topology <type>", "cluster topology for Search: standalone or replica-set")
+    .option("--shards <number>", "number of shards (not supported for Search flows)", parsePositiveInteger("Shard count"))
+    .option("--replicas <number>", "replica set members", parsePositiveInteger("Replica set members"))
+    .option("-m, --mongodb-version <tag>", "MongoDB Docker image tag for Search flows (8.2)", String)
+    .option("--port <number>", "MongoDB port: standalone port or replica-set base port", parsePort)
+    .option("--search", "enable MongoDB Search support")
+    .option("--sample-databases <names>", "comma-separated sample databases to prepare, or 'all'")
+    .option("--search-mongod-port <number>", "host port for the Search mongod node (used by Search flows)", parsePort)
+    .option("--search-port <number>", "host port for mongot gRPC (used by Search flows)", parsePort)
+    .option("--metrics-port <number>", "host port for mongot metrics (used by Search flows)", parsePort)
+    .option("--storage-path <path>", "directory used for generated files and data")
+    .option("--force", "replace an existing saved cluster config when it differs");
+}
+
 const program = new Command();
 
 program
@@ -131,10 +147,19 @@ const searchProgram = program
   .command("search")
   .description("Use MongoDB Search on the current cluster");
 
-addUpOptions(
+addSearchUpOptions(
   searchProgram
     .command("up")
     .description("Set up the current cluster with Search support or start Search services")
+    .addHelpText(
+      "after",
+      `
+Search restrictions:
+  Supported topologies: standalone and replica-set.
+  Supported MongoDB version in this flow: 8.2.
+  Sharded clusters are not supported in Search flows.
+`
+    )
 ).action((options) => handleAction(() => runSearchUp(options)));
 
 searchProgram
@@ -156,10 +181,19 @@ searchProgram
       })
     ));
 
-addUpOptions(
+addSearchUpOptions(
   searchProgram
     .command("quickstart")
     .description("Use the current cluster Search support and run the sample Search flow")
+    .addHelpText(
+      "after",
+      `
+Search restrictions:
+  Supported topologies: standalone and replica-set.
+  Supported MongoDB version in this flow: 8.2.
+  Sharded clusters are not supported in Search flows.
+`
+    )
 ).action((options) => handleAction(() => runSearchQuickstart(options)));
 
 addUpOptions(

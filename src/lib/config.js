@@ -192,6 +192,7 @@ async function promptForMissingValues(partialConfig) {
   const backSelection = "__back__";
   const noneSelection = "__none__";
   const allSelection = "__all__";
+  const searchRequested = partialConfig.search === true;
   const promptedValues = {};
 
   function buildSteps() {
@@ -257,7 +258,7 @@ async function promptForMissingValues(partialConfig) {
       const choices = [
         { name: "Standalone", value: "standalone" },
         { name: "Replica set", value: "replica-set" },
-        { name: "Sharded cluster", value: "sharded" },
+        ...(!searchRequested ? [{ name: "Sharded cluster", value: "sharded" }] : []),
         { name: "Back", value: backSelection }
       ];
       const { topology } = await inquirer.prompt([
@@ -388,15 +389,20 @@ async function promptForMissingValues(partialConfig) {
     }
 
     if (step === "mongodbVersion") {
-      const choices = [
-        { name: "8.2", value: "8.2" },
-        { name: "8.0", value: "8.0" },
-        { name: "7.0", value: "7.0" },
-        { name: "6.0", value: "6.0" },
-        { name: "5.0", value: "5.0" },
-        { name: "Custom", value: "Custom" },
-        { name: "Back", value: backSelection }
-      ];
+      const choices = searchRequested
+        ? [
+            { name: "8.2", value: "8.2" },
+            { name: "Back", value: backSelection }
+          ]
+        : [
+            { name: "8.2", value: "8.2" },
+            { name: "8.0", value: "8.0" },
+            { name: "7.0", value: "7.0" },
+            { name: "6.0", value: "6.0" },
+            { name: "5.0", value: "5.0" },
+            { name: "Custom", value: "Custom" },
+            { name: "Back", value: backSelection }
+          ];
       const { mongodbVersion } = await inquirer.prompt([
         {
           type: "list",
