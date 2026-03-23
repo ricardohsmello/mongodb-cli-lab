@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node src/cli.js --help)",
+      "Bash(node src/cli.js up --topology replica-set --replicas 3 --mongodb-version 8.2 --search)",
+      "Bash(node src/cli.js up --topology replica-set --replicas 3 --mongodb-version 8.2 --port 28000 --search)",
+      "Bash(node src/cli.js up --topology replica-set --replicas 3 --mongodb-version 8.2 --port 28000 --search --sample-databases sample_mflix)",
+      "Bash(node src/cli.js search quickstart)"
+    ]
+  }
+}
