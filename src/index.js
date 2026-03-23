@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { existsSync } from "node:fs";
+import { existsSync, rmSync, statSync } from "node:fs";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -10,6 +10,7 @@ import inquirer from "inquirer";
 import {
   buildQuickstartConfig,
   configsMatch,
+  getAvailableSampleDatabases,
   hasExplicitUpOptions,
   resolveUpConfig
 } from "./lib/config.js";
@@ -18,6 +19,14 @@ const DEFAULT_STORAGE_PATH = "./mongodb-cli-lab";
 const DEFAULT_PROJECT_NAME = "mongodb-cli-lab";
 const COMPOSE_PROJECT_NAME = sanitizeProjectName(DEFAULT_PROJECT_NAME);
 const INTERNAL_MONGO_PORT = 27017;
+const SEARCH_STATE_MARKER = "__MONGODB_CLI_LAB_SEARCH_JSON__";
+const SEARCH_SAMPLE_DATA_URL = "https://atlas-education.s3.amazonaws.com/sampledata.archive";
+const SEARCH_MONGOD_IMAGE = "mongodb/mongodb-community-server:latest";
+const SEARCH_MONGOT_IMAGE = "mongodb/mongodb-community-search:latest";
+const SEARCH_SERVICE_NAME = "search-mongod";
+const MONGOT_SERVICE_NAME = "search-mongot";
+const SEARCH_REPLICA_SET = "searchRs";
+const SEARCH_PASSWORD = "mongotPassword";
 const STATE_FILE_NAME = ".mongodb-cli-lab-state.json";
 const GLOBAL_STATE_DIR = path.join(os.homedir(), ".mongodb-cli-lab");
 let dockerComposeCommand = null;
@@ -51,6 +60,92 @@ function printDocsLink(label, url) {
 }
 
 function buildTopology(config) {
+  if (config.topology === "standalone") {
+    return {
+      configServers: [],
+      shards: [],
+      replicaSet: null,
+      standalone: {
+        serviceName: "mongo-1",
+        hostPort: config.mongosPort,
+        containerPort: INTERNAL_MONGO_PORT,
+        dbPath: path.join(config.storagePath, "standalone", "mongo-1"),
+        replicaSet: config.features?.search ? "rs0" : null
+      },
+      mongos: null,
+      queryRouter: {
+        serviceName: "mongo-1",
+        hostPort: config.mongosPort,
+        containerPort: INTERNAL_MONGO_PORT,
+        sampleArchiveFile: path.join(config.storagePath, "sampledata.archive")
+      },
+      search: config.features?.search
+        ? {
+            mongodServiceName: "mongo-1",
+            mongotServiceName: MONGOT_SERVICE_NAME,
+            replicaSet: "rs0",
+            mongodPort: config.mongosPort,
+            mongotPort: config.search.mongotPort,
+            metricsPort: config.search.metricsPort,
+            usesPrimaryNode: true,
+            seedServiceName: "mongo-1",
+            mongotDataPath: path.join(config.storagePath, "search", "mongot"),
+            mongotConfigFile: path.join(config.storagePath, "search", "mongot.conf"),
+            passwordFile: path.join(config.storagePath, "search", "pwfile"),
+            sampleArchiveFile: path.join(config.storagePath, "search", "sampledata.archive")
+          }
+        : null
+    };
+  }
+
+  if (config.topology === "replica-set") {
+    const members = Array.from({ length: config.replicaSetMembers }, (_, index) => ({
+      id: `rs0-${index + 1}`,
+      serviceName: `rs0-${index + 1}`,
+      replicaSet: "rs0",
+      dbPath: path.join(config.storagePath, "replica-set", `member${index + 1}`),
+      hostPort: config.mongosPort + index,
+      advertisedHostname: `rs0-${index + 1}.localhost`,
+      advertisedHost: config.features?.search
+        ? `rs0-${index + 1}:${INTERNAL_MONGO_PORT}`
+        : `rs0-${index + 1}.localhost:${config.mongosPort + index}`,
+      externalHost: `rs0-${index + 1}.localhost:${config.mongosPort + index}`
+    }));
+
+    return {
+      configServers: [],
+      shards: [],
+      replicaSet: {
+        name: "rs0",
+        members
+      },
+      standalone: null,
+      mongos: null,
+      queryRouter: {
+        serviceName: members[0].serviceName,
+        hostPort: config.mongosPort,
+        containerPort: INTERNAL_MONGO_PORT,
+        sampleArchiveFile: path.join(config.storagePath, "sampledata.archive")
+      },
+      search: config.features?.search
+        ? {
+            mongodServiceName: members[0].serviceName,
+            mongotServiceName: MONGOT_SERVICE_NAME,
+            replicaSet: "rs0",
+            mongodPort: config.mongosPort,
+            mongotPort: config.search.mongotPort,
+            metricsPort: config.search.metricsPort,
+            usesPrimaryNode: true,
+            seedServiceName: members[0].serviceName,
+            mongotDataPath: path.join(config.storagePath, "search", "mongot"),
+            mongotConfigFile: path.join(config.storagePath, "search", "mongot.conf"),
+            passwordFile: path.join(config.storagePath, "search", "pwfile"),
+            sampleArchiveFile: path.join(config.storagePath, "search", "sampledata.archive")
+          }
+        : null
+    };
+  }
+
   const configServers = Array.from({ length: config.configServerMembers }, (_, index) => ({
     id: `cfg${index + 1}`,
     serviceName: `cfg${index + 1}`,
@@ -78,12 +173,125 @@ function buildTopology(config) {
   return {
     configServers,
     shards,
+    replicaSet: null,
+    standalone: null,
     mongos: {
       serviceName: "mongos",
       hostPort: config.mongosPort,
-      containerPort: INTERNAL_MONGO_PORT
-    }
+      containerPort: INTERNAL_MONGO_PORT,
+      sampleArchiveFile: path.join(config.storagePath, "sampledata.archive")
+    },
+    queryRouter: {
+      serviceName: "mongos",
+      hostPort: config.mongosPort,
+      containerPort: INTERNAL_MONGO_PORT,
+      sampleArchiveFile: path.join(config.storagePath, "sampledata.archive")
+    },
+    search: config.features?.search
+      ? {
+          mongodServiceName: SEARCH_SERVICE_NAME,
+          mongotServiceName: MONGOT_SERVICE_NAME,
+          replicaSet: SEARCH_REPLICA_SET,
+          mongodPort: config.search.mongodPort,
+          mongotPort: config.search.mongotPort,
+          metricsPort: config.search.metricsPort,
+          usesPrimaryNode: false,
+          seedServiceName: SEARCH_SERVICE_NAME,
+          dbPath: path.join(config.storagePath, "search", "mongod"),
+          mongotDataPath: path.join(config.storagePath, "search", "mongot"),
+          mongodConfigFile: path.join(config.storagePath, "search", "mongod.conf"),
+          mongotConfigFile: path.join(config.storagePath, "search", "mongot.conf"),
+          passwordFile: path.join(config.storagePath, "search", "pwfile"),
+          sampleArchiveFile: path.join(config.storagePath, "search", "sampledata.archive")
+        }
+      : null
+    
   };
+}
+
+function createSearchMongodConfig() {
+  return `storage:
+  dbPath: /data/db
+net:
+  port: 27017
+  bindIp: 0.0.0.0
+setParameter:
+  searchIndexManagementHostAndPort: ${MONGOT_SERVICE_NAME}:27028
+  mongotHost: ${MONGOT_SERVICE_NAME}:27028
+  skipAuthenticationToSearchIndexManagementServer: false
+  useGrpcForSearch: true
+replication:
+  replSetName: ${SEARCH_REPLICA_SET}
+`;
+}
+
+function createSearchMongotConfig() {
+  return `syncSource:
+  replicaSet:
+    hostAndPort: "${SEARCH_SERVICE_NAME}:27017"
+    username: mongotUser
+    passwordFile: /mongot-community/pwfile
+    authSource: admin
+    tls: false
+    readPreference: primaryPreferred
+storage:
+  dataPath: "data/mongot"
+server:
+  grpc:
+    address: "${MONGOT_SERVICE_NAME}:27028"
+    tls:
+      mode: "disabled"
+metrics:
+  enabled: true
+  address: "${MONGOT_SERVICE_NAME}:9946"
+healthCheck:
+  address: "${MONGOT_SERVICE_NAME}:8080"
+logging:
+  verbosity: INFO
+`;
+}
+
+function buildSearchSetParameterArgs(topology) {
+  if (!topology.search) {
+    return [];
+  }
+
+  return [
+    "--setParameter",
+    `searchIndexManagementHostAndPort=${topology.search.mongotServiceName}:27028`,
+    "--setParameter",
+    `mongotHost=${topology.search.mongotServiceName}:27028`,
+    "--setParameter",
+    "skipAuthenticationToSearchIndexManagementServer=false",
+    "--setParameter",
+    "useGrpcForSearch=true"
+  ];
+}
+
+function createMongotConfig(topology) {
+  return `syncSource:
+  replicaSet:
+    hostAndPort: "${topology.search.seedServiceName}:27017"
+    username: mongotUser
+    passwordFile: /mongot-community/pwfile
+    authSource: admin
+    tls: false
+    readPreference: primaryPreferred
+storage:
+  dataPath: "data/mongot"
+server:
+  grpc:
+    address: "${topology.search.mongotServiceName}:27028"
+    tls:
+      mode: "disabled"
+metrics:
+  enabled: true
+  address: "${topology.search.mongotServiceName}:9946"
+healthCheck:
+  address: "${topology.search.mongotServiceName}:8080"
+logging:
+  verbosity: INFO
+`;
 }
 
 function indent(level, value) {
@@ -97,7 +305,7 @@ function yamlQuote(value) {
 function serviceToYaml(service) {
   const lines = [
     indent(1, `${service.name}:`),
-    indent(2, `image: mongo:${service.imageTag}`),
+    indent(2, `image: ${service.image ?? `mongo:${service.imageTag}`}`),
     indent(2, `container_name: ${service.containerName ?? service.name}`)
   ];
 
@@ -105,6 +313,13 @@ function serviceToYaml(service) {
     lines.push(indent(2, "depends_on:"));
     for (const dependency of service.dependsOn) {
       lines.push(indent(3, `- ${dependency}`));
+    }
+  }
+
+  if (service.extraHosts?.length) {
+    lines.push(indent(2, "extra_hosts:"));
+    for (const host of service.extraHosts) {
+      lines.push(indent(3, `- ${yamlQuote(host)}`));
     }
   }
 
@@ -131,6 +346,100 @@ function serviceToYaml(service) {
 }
 
 function generateComposeFile(config, topology) {
+  if (config.topology === "standalone") {
+    const services = [
+      {
+        name: topology.standalone.serviceName,
+        containerName: topology.standalone.serviceName,
+        imageTag: config.mongodbVersion,
+        command: [
+          "mongod",
+          ...(topology.standalone.replicaSet ? ["--replSet", topology.standalone.replicaSet] : []),
+          "--bind_ip_all",
+          "--port",
+          INTERNAL_MONGO_PORT,
+          "--dbpath",
+          "/data/db",
+          ...buildSearchSetParameterArgs(topology)
+        ],
+        ports: [`${topology.standalone.hostPort}:${topology.standalone.containerPort}`],
+        volumes: [
+          `${topology.standalone.dbPath}:/data/db`,
+          `${topology.queryRouter.sampleArchiveFile}:/sampledata.archive`
+        ]
+      }
+    ];
+
+    if (topology.search) {
+      services.push(
+        {
+          name: topology.search.mongotServiceName,
+          containerName: topology.search.mongotServiceName,
+          image: SEARCH_MONGOT_IMAGE,
+          dependsOn: [topology.standalone.serviceName],
+          command: ["mongot", "--config", "/mongot-community/config.default.yml"],
+          ports: [`${topology.search.mongotPort}:27028`, `${topology.search.metricsPort}:9946`],
+          volumes: [
+            `${topology.search.mongotDataPath}:/data/mongot`,
+            `${topology.search.mongotConfigFile}:/mongot-community/config.default.yml:ro`,
+            `${topology.search.passwordFile}:/mongot-community/pwfile:ro`
+          ]
+        }
+      );
+    }
+
+    return ["services:", ...services.map(serviceToYaml)].join("\n");
+  }
+
+  if (config.topology === "replica-set") {
+    const replicaSetExtraHosts = topology.replicaSet.members.map(
+      (member) => `${member.advertisedHostname}:host-gateway`
+    );
+
+    const services = topology.replicaSet.members.map((member, index) => ({
+      name: member.serviceName,
+      containerName: member.serviceName,
+      imageTag: config.mongodbVersion,
+      command: [
+        "mongod",
+        "--replSet",
+        topology.replicaSet.name,
+        "--bind_ip_all",
+        "--port",
+        INTERNAL_MONGO_PORT,
+        "--dbpath",
+        "/data/db",
+        ...buildSearchSetParameterArgs(topology)
+      ],
+      ports: [`${member.hostPort}:${INTERNAL_MONGO_PORT}`],
+      extraHosts: replicaSetExtraHosts,
+      volumes: [
+        `${member.dbPath}:/data/db`,
+        `${topology.queryRouter.sampleArchiveFile}:/sampledata.archive`
+      ]
+    }));
+
+    if (topology.search) {
+      services.push(
+        {
+          name: topology.search.mongotServiceName,
+          containerName: topology.search.mongotServiceName,
+          image: SEARCH_MONGOT_IMAGE,
+          dependsOn: [topology.search.seedServiceName],
+          command: ["mongot", "--config", "/mongot-community/config.default.yml"],
+          ports: [`${topology.search.mongotPort}:27028`, `${topology.search.metricsPort}:9946`],
+          volumes: [
+            `${topology.search.mongotDataPath}:/data/mongot`,
+            `${topology.search.mongotConfigFile}:/mongot-community/config.default.yml:ro`,
+            `${topology.search.passwordFile}:/mongot-community/pwfile:ro`
+          ]
+        }
+      );
+    }
+
+    return ["services:", ...services.map(serviceToYaml)].join("\n");
+  }
+
   const configServerConnection = topology.configServers
     .map((member) => `${member.serviceName}:${INTERNAL_MONGO_PORT}`)
     .join(",");
@@ -186,9 +495,55 @@ function generateComposeFile(config, topology) {
         INTERNAL_MONGO_PORT
       ],
       ports: [`${topology.mongos.hostPort}:${topology.mongos.containerPort}`],
-      volumes: [path.join(config.storagePath, "logs") + ":/var/log/mongodb"]
+      volumes: [
+        path.join(config.storagePath, "logs") + ":/var/log/mongodb",
+        `${topology.mongos.sampleArchiveFile}:/sampledata.archive`
+      ]
     }
   ];
+
+  if (topology.search) {
+    services.push(
+      {
+        name: topology.search.mongodServiceName,
+        containerName: topology.search.mongodServiceName,
+        image: SEARCH_MONGOD_IMAGE,
+        command: [
+          "mongod",
+          "--config",
+          "/etc/mongod.conf",
+          "--replSet",
+          topology.search.replicaSet
+        ],
+        ports: [`${topology.search.mongodPort}:${INTERNAL_MONGO_PORT}`],
+        volumes: [
+          `${topology.search.dbPath}:/data/db`,
+          `${topology.search.mongodConfigFile}:/etc/mongod.conf:ro`,
+          `${topology.search.sampleArchiveFile}:/sampledata.archive`
+        ]
+      },
+      {
+        name: topology.search.mongotServiceName,
+        containerName: topology.search.mongotServiceName,
+        image: SEARCH_MONGOT_IMAGE,
+        dependsOn: [topology.search.mongodServiceName],
+        command: [
+          "mongot",
+          "--config",
+          "/mongot-community/config.default.yml"
+        ],
+        ports: [
+          `${topology.search.mongotPort}:27028`,
+          `${topology.search.metricsPort}:9946`
+        ],
+        volumes: [
+          `${topology.search.mongotDataPath}:/data/mongot`,
+          `${topology.search.mongotConfigFile}:/mongot-community/config.default.yml:ro`,
+          `${topology.search.passwordFile}:/mongot-community/pwfile:ro`
+        ]
+      }
+    );
+  }
 
   return ["services:", ...services.map(serviceToYaml)].join("\n");
 }
@@ -199,7 +554,7 @@ function buildReplicaSetConfig(replicaSet, members, options = {}) {
     ...(options.configsvr ? { configsvr: true } : {}),
     members: members.map((member, index) => ({
       _id: index,
-      host: `${member.serviceName}:${INTERNAL_MONGO_PORT}`
+      host: member.advertisedHost ?? `${member.serviceName}:${INTERNAL_MONGO_PORT}`
     }))
   };
 }
@@ -233,6 +588,12 @@ for (let attempt = 0; attempt < 120; attempt += 1) {
 
     const status = db.adminCommand({ replSetGetStatus: 1 });
     if (status.ok === 1) {
+      const primaryMember = (status.members || []).find((member) => member.stateStr === "PRIMARY");
+      if (primaryMember) {
+        print("Primary elected for " + cfg._id + ": " + primaryMember.name);
+        quit(0);
+      }
+
       const members = (status.members || []).map((member) => ({
         name: member.name,
         state: member.stateStr,
@@ -333,6 +694,24 @@ async function ensureDirectories(topology, storagePath) {
     ])
   ];
 
+  if (topology.standalone) {
+    directories.push(path.join(storagePath, "standalone"), topology.standalone.dbPath);
+  }
+
+  if (topology.replicaSet) {
+    directories.push(
+      path.join(storagePath, "replica-set"),
+      ...topology.replicaSet.members.map((member) => member.dbPath)
+    );
+  }
+
+  if (topology.search) {
+    directories.push(
+      path.join(storagePath, "search"),
+      topology.search.mongotDataPath
+    );
+  }
+
   await Promise.all(directories.map((directory) => fs.mkdir(directory, { recursive: true })));
 }
 
@@ -341,6 +720,15 @@ function runCommand(command, args, options = {}) {
     stdio: options.capture ? ["ignore", "pipe", "pipe"] : "inherit",
     encoding: options.capture ? "utf8" : undefined
   });
+}
+
+function dockerImageExists(imageName) {
+  try {
+    runCommand("docker", ["image", "inspect", imageName], { capture: true });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function detectDockerComposeCommand() {
@@ -405,10 +793,24 @@ async function writeClusterFiles(config, topology) {
   const composeFile = path.join(config.storagePath, "docker-compose.yml");
   const clusterConfigFile = path.join(config.storagePath, "cluster-config.json");
   const topologyFile = path.join(config.storagePath, "topology.json");
+  const fileWrites = [
+    fs.writeFile(composeFile, generateComposeFile(config, topology), "utf8"),
+    fs.writeFile(clusterConfigFile, JSON.stringify(config, null, 2), "utf8"),
+    fs.writeFile(topologyFile, JSON.stringify(topology, null, 2), "utf8")
+  ];
 
-  await fs.writeFile(composeFile, generateComposeFile(config, topology), "utf8");
-  await fs.writeFile(clusterConfigFile, JSON.stringify(config, null, 2), "utf8");
-  await fs.writeFile(topologyFile, JSON.stringify(topology, null, 2), "utf8");
+  if (topology.search) {
+    if (existsSync(topology.search.passwordFile)) {
+      await fs.chmod(topology.search.passwordFile, 0o600);
+    }
+
+    fileWrites.push(
+      fs.writeFile(topology.search.mongotConfigFile, createMongotConfig(topology), "utf8"),
+      fs.writeFile(topology.search.passwordFile, SEARCH_PASSWORD, { encoding: "utf8", mode: 0o400 })
+    );
+  }
+
+  await Promise.all(fileWrites);
 
   return {
     composeFile,
@@ -488,6 +890,14 @@ function inferStoragePathFromContainerInspect(containerDetails) {
     if (mount.Source.endsWith(`${path.sep}configdb${path.sep}cfg1`)) {
       return path.dirname(path.dirname(mount.Source));
     }
+
+    if (mount.Source.includes(`${path.sep}standalone${path.sep}`)) {
+      return path.dirname(path.dirname(mount.Source));
+    }
+
+    if (mount.Source.includes(`${path.sep}replica-set${path.sep}`)) {
+      return path.dirname(path.dirname(mount.Source));
+    }
   }
 
   return null;
@@ -527,31 +937,35 @@ async function discoverStateFromDocker() {
     return null;
   }
 
-  const inspectOutput = tryRunCommand("docker", ["inspect", containerIds[0]], { capture: true });
-  if (!inspectOutput) {
-    return null;
+  for (const containerId of containerIds) {
+    const inspectOutput = tryRunCommand("docker", ["inspect", containerId], { capture: true });
+    if (!inspectOutput) {
+      continue;
+    }
+
+    let details;
+    try {
+      details = JSON.parse(inspectOutput);
+    } catch {
+      continue;
+    }
+
+    const containerDetails = Array.isArray(details) ? details[0] : null;
+    const storagePath = inferStoragePathFromContainerInspect(containerDetails);
+    if (!storagePath) {
+      continue;
+    }
+
+    const discoveredState = await loadStateFromStoragePath(storagePath);
+    if (!discoveredState) {
+      continue;
+    }
+
+    await saveState(discoveredState);
+    return discoveredState;
   }
 
-  let details;
-  try {
-    details = JSON.parse(inspectOutput);
-  } catch {
-    return null;
-  }
-
-  const containerDetails = Array.isArray(details) ? details[0] : null;
-  const storagePath = inferStoragePathFromContainerInspect(containerDetails);
-  if (!storagePath) {
-    return null;
-  }
-
-  const discoveredState = await loadStateFromStoragePath(storagePath);
-  if (!discoveredState) {
-    return null;
-  }
-
-  await saveState(discoveredState);
-  return discoveredState;
+  return null;
 }
 
 async function loadActiveClusterState() {
@@ -592,10 +1006,19 @@ async function deleteState(storagePath) {
 }
 
 function countExpectedNodes(state) {
+  if (state.config.topology === "standalone") {
+    return 1 + (state.topology.search ? 1 : 0);
+  }
+
+  if (state.config.topology === "replica-set") {
+    return state.topology.replicaSet.members.length + (state.topology.search ? 1 : 0);
+  }
+
   return (
     state.topology.configServers.length +
     state.topology.shards.reduce((total, shard) => total + shard.members.length, 0) +
-    1
+    1 +
+    (state.topology.search ? 2 : 0)
   );
 }
 
@@ -618,8 +1041,16 @@ function summarizeServiceRole(serviceName) {
     return "configsvr";
   }
 
+  if (serviceName === "mongo-1") {
+    return "standalone";
+  }
+
   if (serviceName === "mongos") {
     return "mongos";
+  }
+
+  if (serviceName === MONGOT_SERVICE_NAME) {
+    return "mongot";
   }
 
   return "shardsvr";
@@ -630,8 +1061,20 @@ function buildDisplayName(serviceName, port = INTERNAL_MONGO_PORT) {
     return `cfg-${port}`;
   }
 
+  if (serviceName === "mongo-1") {
+    return `mongo-${port}`;
+  }
+
+  if (serviceName.startsWith("rs0-")) {
+    return `${serviceName}-${port}`;
+  }
+
   if (serviceName === "mongos") {
     return `mongos-${port}`;
+  }
+
+  if (serviceName === MONGOT_SERVICE_NAME) {
+    return `mongot-${port}`;
   }
 
   return `shard-${port}`;
@@ -685,11 +1128,17 @@ function printClusterSummary(state, containers) {
   console.log("\nCluster summary\n");
   console.log(`Project: ${state.projectName}`);
   console.log(`Storage: ${state.config.storagePath}`);
+  console.log(`Topology: ${state.config.topology}`);
   console.log(`MongoDB version: ${state.config.mongodbVersion}`);
-  console.log(`Shards: ${state.config.shardCount}`);
-  console.log(`Replica set members per shard: ${state.config.replicaSetMembers}`);
+  if (state.config.topology === "sharded") {
+    console.log(`Shards: ${state.config.shardCount}`);
+    console.log(`Replica set members per shard: ${state.config.replicaSetMembers}`);
+  } else if (state.config.topology === "replica-set") {
+    console.log(`Replica set members: ${state.config.replicaSetMembers}`);
+  }
+  console.log(`Search support: ${state.config.features?.search ? "enabled" : "disabled"}`);
   console.log(`Nodes running: ${runningCount}/${expectedNodes}`);
-  console.log(`mongos: mongodb://localhost:${state.config.mongosPort}\n`);
+  console.log(`Connection: mongodb://localhost:${state.config.mongosPort}\n`);
 }
 
 function printContainersTable(containers) {
@@ -714,31 +1163,57 @@ function printTopologyDetails(state, containers) {
 
   console.log("Topology\n");
 
-  console.log(`Config server replica set: ${state.config.configServerReplicaSet}`);
-  console.log(`Members: ${state.config.configServerMembers}`);
-  for (const member of state.topology.configServers) {
-    const container = containerMap.get(member.serviceName);
+  if (state.config.topology === "standalone") {
+    const container = containerMap.get(state.topology.standalone.serviceName);
     console.log(
-      `- ${buildDisplayName(member.serviceName)} (${member.serviceName}) | state: ${containerStateLabel(container)} | port: ${containerPortLabel(container)}`
+      `- standalone (${state.topology.standalone.serviceName}) | state: ${containerStateLabel(container)} | port: ${containerPortLabel(container)}`
     );
-  }
-
-  console.log(`\nRouter`);
-  const mongosContainer = containerMap.get(state.topology.mongos.serviceName);
-  console.log(
-    `- ${buildDisplayName(state.topology.mongos.serviceName)} (${state.topology.mongos.serviceName}) | state: ${containerStateLabel(mongosContainer)} | port: ${containerPortLabel(mongosContainer)}`
-  );
-
-  console.log(`\nShards`);
-  for (const [index, shard] of state.topology.shards.entries()) {
-    console.log(`- Shard ${index + 1}: ${shard.replicaSet}`);
-    console.log(`  Members: ${shard.members.length}`);
-    for (const member of shard.members) {
+    console.log();
+  } else if (state.config.topology === "replica-set") {
+    console.log(`Replica set: ${state.topology.replicaSet.name}`);
+    for (const member of state.topology.replicaSet.members) {
       const container = containerMap.get(member.serviceName);
       console.log(
-        `  - ${buildDisplayName(member.serviceName)} (${member.serviceName}) | state: ${containerStateLabel(container)} | port: ${containerPortLabel(container)}`
+        `- ${buildDisplayName(member.serviceName)} (${member.serviceName}) | state: ${containerStateLabel(container)} | port: ${containerPortLabel(container)} | host: ${member.externalHost ?? member.advertisedHost}`
       );
     }
+    console.log();
+  } else {
+
+    console.log(`Config server replica set: ${state.config.configServerReplicaSet}`);
+    console.log(`Members: ${state.config.configServerMembers}`);
+    for (const member of state.topology.configServers) {
+      const container = containerMap.get(member.serviceName);
+      console.log(
+        `- ${buildDisplayName(member.serviceName)} (${member.serviceName}) | state: ${containerStateLabel(container)} | port: ${containerPortLabel(container)}`
+      );
+    }
+
+    console.log(`\nRouter`);
+    const mongosContainer = containerMap.get(state.topology.mongos.serviceName);
+    console.log(
+      `- ${buildDisplayName(state.topology.mongos.serviceName)} (${state.topology.mongos.serviceName}) | state: ${containerStateLabel(mongosContainer)} | port: ${containerPortLabel(mongosContainer)}`
+    );
+
+    console.log(`\nShards`);
+    for (const [index, shard] of state.topology.shards.entries()) {
+      console.log(`- Shard ${index + 1}: ${shard.replicaSet}`);
+      console.log(`  Members: ${shard.members.length}`);
+      for (const member of shard.members) {
+        const container = containerMap.get(member.serviceName);
+        console.log(
+          `  - ${buildDisplayName(member.serviceName)} (${member.serviceName}) | state: ${containerStateLabel(container)} | port: ${containerPortLabel(container)}`
+        );
+      }
+    }
+  }
+
+  if (state.topology.search) {
+    console.log(`\nSearch`);
+    const mongotContainer = containerMap.get(state.topology.search.mongotServiceName);
+    console.log(
+      `- ${buildDisplayName(state.topology.search.mongotServiceName, 27028)} (${state.topology.search.mongotServiceName}) | state: ${containerStateLabel(mongotContainer)} | port: ${containerPortLabel(mongotContainer, 27028)}`
+    );
   }
 
   console.log();
@@ -746,11 +1221,23 @@ function printTopologyDetails(state, containers) {
 
 function printReplicaSetHealth(state, containers) {
   const containerMap = buildContainerMap(containers);
+  console.log("Replica set health\n");
+
+  if (state.config.topology === "standalone") {
+    const standaloneState = containerMap.get(state.topology.standalone.serviceName)?.State ?? "not created";
+    console.log(`- standalone | state: ${standaloneState}\n`);
+  } else if (state.config.topology === "replica-set") {
+    const runningMembers = state.topology.replicaSet.members.filter(
+      (member) => containerMap.get(member.serviceName)?.State === "running"
+    ).length;
+    console.log(
+      `- ${state.topology.replicaSet.name} | running members: ${runningMembers}/${state.topology.replicaSet.members.length}\n`
+    );
+  } else {
   const configRunning = state.topology.configServers.filter(
     (member) => containerMap.get(member.serviceName)?.State === "running"
   ).length;
 
-  console.log("Replica set health\n");
   console.log(
     `- ${state.config.configServerReplicaSet} | running members: ${configRunning}/${state.topology.configServers.length}`
   );
@@ -774,29 +1261,62 @@ function printReplicaSetHealth(state, containers) {
 
   const mongosState = containerMap.get(state.topology.mongos.serviceName)?.State ?? "not created";
   console.log(`- mongos | state: ${mongosState}\n`);
+  }
+
+  if (state.topology.search) {
+    const searchState = containerMap.get(state.topology.search.mongodServiceName)?.State ?? "not created";
+    const mongotState = containerMap.get(state.topology.search.mongotServiceName)?.State ?? "not created";
+    console.log("Search services\n");
+    console.log(
+      `- MongoDB Search enabled on ${state.topology.search.mongodServiceName} | state: ${searchState}`
+    );
+    console.log(`- ${state.topology.search.mongotServiceName} | state: ${mongotState}\n`);
+  }
 }
 
 function printTopologyDiagram(state) {
   console.log("Cluster structure\n");
-  console.log("        +---------------------------+");
-  console.log(`        | mongos                    |`);
-  console.log(`        | localhost:${state.config.mongosPort}${" ".repeat(Math.max(0, 12 - String(state.config.mongosPort).length))}|`);
-  console.log("        +-------------+-------------+");
-  console.log("                      |");
-  console.log("        +-------------v-------------+");
-  console.log(`        | ${state.config.configServerReplicaSet.padEnd(27, " ")}|`);
-  console.log(
-    `        | ${state.topology.configServers.map((member) => member.serviceName).join(" ").padEnd(27, " ")}|`
-  );
-  console.log("        +-------------+-------------+");
-  console.log("                      |");
-
-  for (const shard of state.topology.shards) {
-    console.log("               +------v------+");
-    console.log(`               | ${shard.replicaSet.padEnd(11, " ")}|`);
+  if (state.config.topology === "standalone") {
+    console.log("        +---------------------------+");
+    console.log("        | standalone                |");
+    console.log(`        | localhost:${state.config.mongosPort}${" ".repeat(Math.max(0, 12 - String(state.config.mongosPort).length))}|`);
+    console.log("        +---------------------------+");
+  } else if (state.config.topology === "replica-set") {
+    console.log("        +---------------------------+");
+    console.log(`        | ${state.topology.replicaSet.name.padEnd(27, " ")}|`);
+    console.log(`        | localhost:${state.config.mongosPort}${" ".repeat(Math.max(0, 12 - String(state.config.mongosPort).length))}|`);
+    console.log("        +-------------+-------------+");
+    for (const member of state.topology.replicaSet.members) {
+      console.log(`               - ${member.serviceName}`);
+    }
+  } else {
+    console.log("        +---------------------------+");
+    console.log(`        | mongos                    |`);
+    console.log(`        | localhost:${state.config.mongosPort}${" ".repeat(Math.max(0, 12 - String(state.config.mongosPort).length))}|`);
+    console.log("        +-------------+-------------+");
+    console.log("                      |");
+    console.log("        +-------------v-------------+");
+    console.log(`        | ${state.config.configServerReplicaSet.padEnd(27, " ")}|`);
     console.log(
-      `               | ${`${shard.members.length} members`.padEnd(11, " ")}|`
+      `        | ${state.topology.configServers.map((member) => member.serviceName).join(" ").padEnd(27, " ")}|`
     );
+    console.log("        +-------------+-------------+");
+    console.log("                      |");
+
+    for (const shard of state.topology.shards) {
+      console.log("               +------v------+");
+      console.log(`               | ${shard.replicaSet.padEnd(11, " ")}|`);
+      console.log(
+        `               | ${`${shard.members.length} members`.padEnd(11, " ")}|`
+      );
+      console.log("               +-------------+");
+    }
+  }
+
+  if (state.topology.search) {
+    console.log("               +------v------+");
+    console.log(`               | search      |`);
+    console.log(`               | ${"mongot".padEnd(11, " ")}|`);
     console.log("               +-------------+");
   }
 
@@ -808,6 +1328,64 @@ function printStep(stepNumber, totalSteps, title, description) {
   if (description) {
     console.log(description);
   }
+}
+
+function getPrimaryConnectionString(state) {
+  if (state.config.topology === "standalone" && state.config.features?.search) {
+    return getDirectConnectionString(state);
+  }
+
+  if (state.config.topology === "replica-set") {
+    if (state.config.features?.search) {
+      return getDirectConnectionString(state);
+    }
+
+    const hosts = state.topology.replicaSet.members
+      .map((member) => member.externalHost ?? `${member.advertisedHostname}:${member.hostPort}`)
+      .join(",");
+    return `mongodb://${hosts}/?replicaSet=${state.topology.replicaSet.name}`;
+  }
+
+  return `mongodb://localhost:${state.config.mongosPort}`;
+}
+
+function getReplicaSetPrimaryMember(state) {
+  if (state.config.topology !== "replica-set") {
+    return null;
+  }
+
+  try {
+    const status = runMongoJson(
+      state,
+      state.topology.replicaSet.members[0].serviceName,
+      `
+const status = db.adminCommand({ replSetGetStatus: 1 });
+const primaryName = (status.members || []).find((member) => member.stateStr === "PRIMARY")?.name ?? null;
+const result = { primaryName };
+`.trim()
+    );
+
+    if (!status.primaryName) {
+      return null;
+    }
+
+    return state.topology.replicaSet.members.find((member) =>
+      [member.advertisedHost, member.externalHost, `${member.serviceName}:${INTERNAL_MONGO_PORT}`].includes(status.primaryName)
+    ) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function getDirectConnectionString(state) {
+  if (state.config.topology === "replica-set") {
+    const primaryMember = getReplicaSetPrimaryMember(state);
+    if (primaryMember) {
+      return `mongodb://localhost:${primaryMember.hostPort}/?directConnection=true`;
+    }
+  }
+
+  return `mongodb://localhost:${state.config.mongosPort}/?directConnection=true`;
 }
 
 function waitForMongo(state, serviceName) {
@@ -875,6 +1453,589 @@ function runMongoJson(state, serviceName, script) {
   return JSON.parse(line.slice(marker.length));
 }
 
+function runSearchContainerCommand(state, serviceName, args = [], options = {}) {
+  return runCompose(state, ["exec", "-T", serviceName, ...args], options);
+}
+
+function runContainerCommand(state, serviceName, args = [], options = {}) {
+  return runCompose(state, ["exec", "-T", serviceName, ...args], options);
+}
+
+function getSearchMongoServiceCandidates(state) {
+  if (!state.topology.search) {
+    return [];
+  }
+
+  if (!state.topology.search.usesPrimaryNode) {
+    return [state.topology.search.mongodServiceName];
+  }
+
+  if (state.config.topology === "replica-set") {
+    return state.topology.replicaSet.members.map((member) => member.serviceName);
+  }
+
+  if (state.config.topology === "standalone") {
+    return [state.topology.standalone.serviceName];
+  }
+
+  return [state.topology.search.mongodServiceName];
+}
+
+function getSearchMongoServiceName(state, options = {}) {
+  const { writablePrimary = false } = options;
+  const candidates = getSearchMongoServiceCandidates(state);
+
+  if (!writablePrimary || candidates.length <= 1) {
+    return candidates[0] ?? state.topology.search.mongodServiceName;
+  }
+
+  if (state.config.topology === "replica-set") {
+    const primaryMember = getReplicaSetPrimaryMember(state);
+    if (primaryMember) {
+      return primaryMember.serviceName;
+    }
+  }
+
+  for (const serviceName of candidates) {
+    try {
+      const result = runMongoJson(
+        state,
+        serviceName,
+        `
+const hello = (db.hello && db.hello()) || db.isMaster();
+const result = {
+  isWritablePrimary: hello.isWritablePrimary === true || hello.ismaster === true
+};
+`.trim()
+      );
+
+      if (result.isWritablePrimary) {
+        return serviceName;
+      }
+    } catch {
+      // Try the next candidate.
+    }
+  }
+
+  return candidates[0] ?? state.topology.search.mongodServiceName;
+}
+
+function runSearchMongoJson(state, script) {
+  const serviceName = getSearchMongoServiceName(state, { writablePrimary: true });
+  const output = runCompose(
+    state,
+    ["exec", "-T", serviceName, "mongosh", "--quiet", "--eval", `${script}\nprint("${SEARCH_STATE_MARKER}" + JSON.stringify(result));`],
+    { capture: true }
+  );
+
+  const line = output
+    .split("\n")
+    .map((entry) => entry.trim())
+    .find((entry) => entry.startsWith(SEARCH_STATE_MARKER));
+
+  if (!line) {
+    throw new Error("Could not parse MongoDB Search command output.");
+  }
+
+  return JSON.parse(line.slice(SEARCH_STATE_MARKER.length));
+}
+
+function ensureSearchEnabled(state) {
+  if (!state.config.features?.search || !state.topology.search) {
+    throw new Error("This cluster was not created with Search support enabled.");
+  }
+}
+
+function getClusterSampleDatabases(state, requestedDatabases = state.config.sampleDatabases ?? []) {
+  const available = new Set(getAvailableSampleDatabases());
+  const selection = requestedDatabases.length ? requestedDatabases : state.config.sampleDatabases ?? [];
+
+  for (const databaseName of selection) {
+    if (!available.has(databaseName)) {
+      throw new Error(`Unknown sample database '${databaseName}'.`);
+    }
+  }
+
+  return selection;
+}
+
+function ensureClusterSampleArchive(state) {
+  if (existsSync(state.topology.queryRouter.sampleArchiveFile)) {
+    const stat = statSync(state.topology.queryRouter.sampleArchiveFile);
+    if (stat.isFile()) {
+      return false;
+    }
+
+    if (stat.isDirectory()) {
+      rmSync(state.topology.queryRouter.sampleArchiveFile, { recursive: true, force: true });
+    }
+  }
+
+  console.log("Downloading the sample archive used by the cluster lab.");
+  runCommand("curl", ["-L", SEARCH_SAMPLE_DATA_URL, "-o", state.topology.queryRouter.sampleArchiveFile]);
+  return true;
+}
+
+function ensureSampleArchiveMountedOnService(state, serviceName) {
+  try {
+    runContainerCommand(state, serviceName, [
+      "sh",
+      "-lc",
+      "test -f /sampledata.archive"
+    ]);
+    return;
+  } catch {
+    console.log(`Refreshing ${serviceName} so the sample archive is mounted correctly.`);
+    runCompose(state, ["up", "-d", "--force-recreate", serviceName]);
+    waitForMongo(state, serviceName);
+  }
+}
+
+function getClusterSampleDatabaseCounts(state, databaseNames) {
+  const serviceName = state.config.topology === "replica-set"
+    ? getSearchMongoServiceName(state, { writablePrimary: true })
+    : state.topology.queryRouter.serviceName;
+
+  return databaseNames.map((databaseName) => ({
+    databaseName,
+    count: runMongoJson(
+      state,
+      serviceName,
+      `
+const database = db.getSiblingDB(${JSON.stringify(databaseName)});
+const result = {
+  count: database.getCollectionNames().reduce((total, collectionName) => {
+    return total + database.getCollection(collectionName).countDocuments({});
+  }, 0)
+};
+`.trim()
+    ).count
+  }));
+}
+
+function ensureClusterSampleDatabasesImported(state, requestedDatabases) {
+  const selectedDatabases = getClusterSampleDatabases(state, requestedDatabases);
+  if (!selectedDatabases.length) {
+    return [];
+  }
+
+  ensureClusterSampleArchive(state);
+
+  if (state.config.topology === "replica-set") {
+    for (const member of state.topology.replicaSet.members) {
+      ensureSampleArchiveMountedOnService(state, member.serviceName);
+    }
+  } else {
+    ensureSampleArchiveMountedOnService(state, state.topology.queryRouter.serviceName);
+  }
+
+  const restoreServiceName = state.config.topology === "replica-set"
+    ? getSearchMongoServiceName(state, { writablePrimary: true })
+    : state.topology.queryRouter.serviceName;
+
+  try {
+    const counts = getClusterSampleDatabaseCounts(state, selectedDatabases);
+    if (counts.every((database) => database.count > 0)) {
+      return counts;
+    }
+  } catch {
+    // Continue to restore.
+  }
+
+  runContainerCommand(state, restoreServiceName, [
+    "mongorestore",
+    "--host",
+    "localhost",
+    "--port",
+    String(INTERNAL_MONGO_PORT),
+    "--archive=/sampledata.archive",
+    ...selectedDatabases.map((databaseName) => `--nsInclude=${databaseName}.*`)
+  ]);
+
+  for (let attempt = 0; attempt < 180; attempt += 1) {
+    try {
+      const counts = getClusterSampleDatabaseCounts(state, selectedDatabases);
+      if (counts.every((database) => database.count > 0)) {
+        return counts;
+      }
+    } catch {
+      // keep waiting
+    }
+
+    sleep(1000);
+  }
+
+  throw new Error("Timed out waiting for the selected sample databases to be imported into the cluster.");
+}
+
+function isSearchServiceRunning(state, serviceName) {
+  return getComposeContainers(state).some(
+    (container) => container.Service === serviceName && container.State === "running"
+  );
+}
+
+function ensureSearchAssets(state) {
+  ensureSearchEnabled(state);
+  if (!dockerImageExists(SEARCH_MONGOT_IMAGE)) {
+    runCommand("docker", ["pull", SEARCH_MONGOT_IMAGE]);
+  }
+  ensureClusterSampleArchive(state);
+}
+
+function ensureSearchReplicaPrimary(state) {
+  ensureSearchEnabled(state);
+
+  if (!state.topology.search.usesPrimaryNode) {
+    for (let attempt = 0; attempt < 120; attempt += 1) {
+      try {
+        runMongoScript(
+          state,
+          SEARCH_SERVICE_NAME,
+          `
+const replicaConfig = {
+  _id: ${JSON.stringify(SEARCH_REPLICA_SET)},
+  members: [
+    { _id: 0, host: ${JSON.stringify(`${SEARCH_SERVICE_NAME}:27017`)} }
+  ]
+};
+
+try {
+  const status = db.adminCommand({ replSetGetStatus: 1 });
+  if (status.ok === 1) {
+    print("Replica set already initialized");
+  }
+} catch (error) {
+  if (error.code === 94) {
+    printjson(rs.initiate(replicaConfig));
+  } else {
+    throw error;
+  }
+}
+`.trim()
+        );
+        break;
+      } catch {
+        sleep(1000);
+      }
+    }
+
+    for (let attempt = 0; attempt < 120; attempt += 1) {
+      try {
+        const result = runSearchMongoJson(
+          state,
+          `
+const hello = db.hello();
+const result = {
+  isWritablePrimary: hello.isWritablePrimary === true || hello.ismaster === true
+};
+`.trim()
+        );
+
+        if (result.isWritablePrimary) {
+          return;
+        }
+      } catch {
+        // keep waiting
+      }
+
+      sleep(1000);
+    }
+
+    throw new Error("Timed out waiting for the Search node to become primary.");
+  }
+
+  for (let attempt = 0; attempt < 120; attempt += 1) {
+    try {
+      if (state.config.topology === "standalone") {
+        runMongoScript(
+          state,
+          state.topology.standalone.serviceName,
+          `
+const replicaConfig = {
+  _id: ${JSON.stringify(state.topology.search.replicaSet)},
+  members: [
+    { _id: 0, host: ${JSON.stringify(`${state.topology.standalone.serviceName}:27017`)} }
+  ]
+};
+
+try {
+  const status = db.adminCommand({ replSetGetStatus: 1 });
+  if (status.ok === 1) {
+    print("Replica set already initialized");
+  }
+} catch (error) {
+  if (error.code === 94) {
+    printjson(rs.initiate(replicaConfig));
+  } else {
+    throw error;
+  }
+}
+`.trim()
+        );
+      }
+
+      const serviceName = getSearchMongoServiceName(state, { writablePrimary: true });
+      const hello = runMongoJson(
+        state,
+        serviceName,
+        `
+const hello = (db.hello && db.hello()) || db.isMaster();
+const result = {
+  isWritablePrimary: hello.isWritablePrimary === true || hello.ismaster === true
+};
+`.trim()
+      );
+
+      if (hello.isWritablePrimary) {
+        return;
+      }
+    } catch {
+      // keep waiting
+    }
+
+    sleep(1000);
+  }
+  throw new Error("Timed out waiting for Search support to become ready on the main MongoDB node.");
+}
+
+function ensureSearchCoordinatorUser(state) {
+  ensureSearchEnabled(state);
+  const serviceName = getSearchMongoServiceName(state, { writablePrimary: true });
+
+  runMongoScript(
+    state,
+    serviceName,
+    `
+const adminDb = db.getSiblingDB("admin");
+const username = "mongotUser";
+const password = ${JSON.stringify(SEARCH_PASSWORD)};
+const existing = adminDb.getUser(username);
+
+if (!existing) {
+  adminDb.createUser({
+    user: username,
+    pwd: password,
+    roles: [{ role: "searchCoordinator", db: "admin" }]
+  });
+} else {
+  adminDb.updateUser(username, {
+    pwd: password,
+    roles: [{ role: "searchCoordinator", db: "admin" }]
+  });
+}
+`.trim()
+  );
+}
+
+function getSearchSampleDatabases(state, requestedDatabases = state.config.sampleDatabases ?? []) {
+  const available = new Set(getAvailableSampleDatabases());
+  const selection = requestedDatabases.length ? requestedDatabases : state.config.sampleDatabases ?? [];
+
+  for (const databaseName of selection) {
+    if (!available.has(databaseName)) {
+      throw new Error(`Unknown sample database '${databaseName}'.`);
+    }
+  }
+
+  return selection;
+}
+
+function getSearchDatabaseCounts(state, databaseNames) {
+  return databaseNames.map((databaseName) => ({
+    databaseName,
+    count: runMongoJson(
+      state,
+      getSearchMongoServiceName(state, { writablePrimary: true }),
+      `
+const result = {
+  count: db.getSiblingDB(${JSON.stringify(databaseName)}).getCollectionNames().reduce((total, collectionName) => {
+    return total + db.getSiblingDB(${JSON.stringify(databaseName)}).getCollection(collectionName).countDocuments({});
+  }, 0)
+};
+`.trim()
+    ).count
+  }));
+}
+
+function ensureSampleDatabasesImported(state, requestedDatabases) {
+  ensureSearchEnabled(state);
+  const selectedDatabases = getSearchSampleDatabases(state, requestedDatabases);
+  return ensureClusterSampleDatabasesImported(state, selectedDatabases);
+}
+
+function ensureSearchInfrastructure(state) {
+  ensureSearchEnabled(state);
+  ensureSearchAssets(state);
+
+  ensureSearchReplicaPrimary(state);
+  ensureSearchCoordinatorUser(state);
+
+  if (!isSearchServiceRunning(state, MONGOT_SERVICE_NAME)) {
+    printStep(
+      state.topology.search.usesPrimaryNode ? 1 : 2,
+      state.topology.search.usesPrimaryNode ? 1 : 2,
+      "Start mongot",
+      "Launching mongot for Search and vector operations."
+    );
+    runCompose(state, ["up", "-d", MONGOT_SERVICE_NAME]);
+  }
+}
+
+function waitForSearchRuntime(state) {
+  ensureSearchEnabled(state);
+
+  for (let attempt = 0; attempt < 120; attempt += 1) {
+    try {
+      const result = runSearchMongoJson(
+        state,
+        `
+const database = db.getSiblingDB("__mongodb_cli_lab_search_probe");
+const collection = database.getCollection("probe");
+
+try {
+  database.createCollection("probe");
+} catch (error) {
+  if (error.codeName !== "NamespaceExists") {
+    throw error;
+  }
+}
+
+const indexes = collection.getSearchIndexes();
+const result = { ready: Array.isArray(indexes) || typeof indexes?.toArray === "function" };
+`.trim()
+      );
+
+      if (result.ready) {
+        console.log("mongot is ready for Search operations.");
+        return;
+      }
+    } catch {
+      // keep waiting
+    }
+
+    if (attempt === 0 || attempt % 5 === 4) {
+      console.log(`Waiting for mongot to become ready (${attempt + 1}s elapsed)...`);
+    }
+
+    sleep(1000);
+  }
+
+  throw new Error("Timed out waiting for mongot to become ready for Search operations.");
+}
+
+function ensureSearchIndex(state, databaseName, collectionName, indexName) {
+  return runSearchMongoJson(
+    state,
+    `
+const database = db.getSiblingDB(${JSON.stringify(databaseName)});
+const collection = database.getCollection(${JSON.stringify(collectionName)});
+const existing = collection
+  .getSearchIndexes()
+  .find((index) => index.name === ${JSON.stringify(indexName)});
+
+let action = "reuse";
+if (!existing) {
+  collection.createSearchIndex(
+    ${JSON.stringify(indexName)},
+    { mappings: { dynamic: true } }
+  );
+  action = "create";
+}
+
+const result = { action };
+`.trim()
+  );
+}
+
+function waitForSearchIndexManagement(state, databaseName, collectionName, indexName) {
+  for (let attempt = 0; attempt < 120; attempt += 1) {
+    try {
+      return ensureSearchIndex(state, databaseName, collectionName, indexName);
+    } catch {
+      sleep(1000);
+    }
+  }
+
+  throw new Error("Timed out waiting for Search Index Management to become available.");
+}
+
+function waitForSearchQuery(state, databaseName, collectionName, query, pathName) {
+  for (let attempt = 0; attempt < 120; attempt += 1) {
+    try {
+      const result = runSearchMongoJson(
+        state,
+        `
+const documents = db.getSiblingDB(${JSON.stringify(databaseName)})
+  .getCollection(${JSON.stringify(collectionName)})
+  .aggregate([
+    {
+      $search: {
+        text: {
+          query: ${JSON.stringify(query)},
+          path: ${JSON.stringify(pathName)}
+        }
+      }
+    },
+    { $limit: 5 },
+    {
+      $project: {
+        _id: 0,
+        title: 1,
+        plot: 1,
+        name: 1,
+        summary: 1
+      }
+    }
+  ])
+  .toArray();
+
+const result = { documents };
+`.trim()
+      );
+
+      if (result.documents.length) {
+        return result.documents;
+      }
+    } catch {
+      // keep waiting
+    }
+
+    sleep(1000);
+  }
+
+  throw new Error("Timed out waiting for MongoDB Search to return results.");
+}
+
+function printSearchStatus(state, containers) {
+  ensureSearchEnabled(state);
+  const serviceNames = new Set([
+    ...getSearchMongoServiceCandidates(state),
+    state.topology.search.mongotServiceName
+  ]);
+  const searchContainers = containers.filter((container) => serviceNames.has(container.Service));
+
+  console.log("\nSearch status\n");
+  console.log(`MongoDB: ${getPrimaryConnectionString(state)}`);
+  if (state.config.topology === "replica-set") {
+    console.log(`Direct node access: ${getDirectConnectionString(state)}`);
+  }
+  console.log(`mongot: localhost:${state.topology.search.mongotPort}`);
+  console.log(`Prepared sample databases: ${(state.config.sampleDatabases ?? []).join(", ") || "none"}\n`);
+
+  if (!searchContainers.length) {
+    console.log("Search services are not running.\n");
+    return;
+  }
+
+  console.table(
+    searchContainers.map((container) => ({
+      service: container.Service,
+      state: container.State,
+      ports: formatPorts(container.Publishers)
+    }))
+  );
+}
+
 function getCollectionDocumentCount(state, databaseName, collectionName) {
   return runMongoJson(
     state,
@@ -898,10 +2059,193 @@ const result = { count };
   ).count;
 }
 
+function getCollectionShardKeyCandidates(state, databaseName, collectionName) {
+  return runMongoJson(
+    state,
+    state.topology.queryRouter.serviceName,
+    `
+const databaseName = ${JSON.stringify(databaseName)};
+const collectionName = ${JSON.stringify(collectionName)};
+const collection = db.getSiblingDB(databaseName).getCollection(collectionName);
+
+function isPlainObject(value) {
+  return value && typeof value === "object" && !Array.isArray(value) && !(value instanceof Date) && !(value instanceof ObjectId);
+}
+
+function collectPaths(value, prefix = "") {
+  const paths = [];
+
+  if (!isPlainObject(value)) {
+    return paths;
+  }
+
+  for (const [key, entry] of Object.entries(value)) {
+    const path = prefix ? prefix + "." + key : key;
+
+    if (Array.isArray(entry)) {
+      if (entry.length > 0 && isPlainObject(entry[0])) {
+        continue;
+      }
+      paths.push(path);
+      continue;
+    }
+
+    if (isPlainObject(entry)) {
+      paths.push(...collectPaths(entry, path));
+      continue;
+    }
+
+    paths.push(path);
+  }
+
+  return paths;
+}
+
+let sampleDocument = null;
+try {
+  sampleDocument = collection.findOne({});
+} catch (error) {
+  if (error.codeName !== "NamespaceNotFound" && !String(error.message || "").includes("ns does not exist")) {
+    throw error;
+  }
+}
+
+const fields = sampleDocument ? Array.from(new Set(["_id", ...collectPaths(sampleDocument)])).sort() : [];
+const result = { fields, hasSample: Boolean(sampleDocument) };
+`.trim()
+  ).fields;
+}
+
+function getShardKeyIndexSupport(state, databaseName, collectionName, shardKeyField, shardKeyMode = "range") {
+  return runMongoJson(
+    state,
+    state.topology.queryRouter.serviceName,
+    `
+const databaseName = ${JSON.stringify(databaseName)};
+const collectionName = ${JSON.stringify(collectionName)};
+const shardKeyField = ${JSON.stringify(shardKeyField)};
+const shardKeyMode = ${JSON.stringify(shardKeyMode)};
+const collection = db.getSiblingDB(databaseName).getCollection(collectionName);
+const requiredKey = { [shardKeyField]: shardKeyMode === "hashed" ? "hashed" : 1 };
+
+function isCompatibleIndex(indexKey) {
+  const entries = Object.entries(indexKey || {});
+  if (!entries.length) {
+    return false;
+  }
+
+  const [firstField, firstValue] = entries[0];
+  if (firstField !== shardKeyField) {
+    return false;
+  }
+
+  if (shardKeyMode === "hashed") {
+    return firstValue === "hashed";
+  }
+
+  return firstValue === 1 || firstValue === -1;
+}
+
+let indexes = [];
+try {
+  indexes = collection.getIndexes().map((index) => ({
+    name: index.name,
+    key: index.key
+  }));
+} catch (error) {
+  if (error.codeName !== "NamespaceNotFound" && !String(error.message || "").includes("ns does not exist")) {
+    throw error;
+  }
+}
+
+const result = {
+  requiredKey,
+  indexes,
+  hasCompatibleIndex: indexes.some((index) => isCompatibleIndex(index.key))
+};
+`.trim()
+  );
+}
+
+function createShardKeyIndex(state, databaseName, collectionName, shardKeyField, shardKeyMode = "range") {
+  return runMongoJson(
+    state,
+    state.topology.queryRouter.serviceName,
+    `
+const databaseName = ${JSON.stringify(databaseName)};
+const collectionName = ${JSON.stringify(collectionName)};
+const shardKeyField = ${JSON.stringify(shardKeyField)};
+const shardKeyMode = ${JSON.stringify(shardKeyMode)};
+const collection = db.getSiblingDB(databaseName).getCollection(collectionName);
+const key = { [shardKeyField]: shardKeyMode === "hashed" ? "hashed" : 1 };
+const indexName = collection.createIndex(key);
+const result = {
+  indexName,
+  key
+};
+`.trim()
+  );
+}
+
+async function ensureShardKeyIndex(state, databaseName, collectionName, shardKeyField, shardKeyMode = "range") {
+  const indexSupport = getShardKeyIndexSupport(
+    state,
+    databaseName,
+    collectionName,
+    shardKeyField,
+    shardKeyMode
+  );
+
+  if (indexSupport.hasCompatibleIndex) {
+    return {
+      created: false,
+      key: indexSupport.requiredKey
+    };
+  }
+
+  const existingIndexes = indexSupport.indexes.length
+    ? indexSupport.indexes.map((index) => `${index.name}: ${JSON.stringify(index.key)}`).join("\n")
+    : "No indexes found.";
+
+  const confirmed = await confirmAction(
+    [
+      "MongoDB requires an index that starts with the proposed shard key before sharding this existing collection.",
+      `Namespace: ${databaseName}.${collectionName}`,
+      `Required index: ${JSON.stringify(indexSupport.requiredKey)}`,
+      "",
+      "Current indexes:",
+      existingIndexes,
+      "",
+      "Create the required index now?"
+    ].join("\n"),
+    true
+  );
+
+  if (!confirmed) {
+    throw new Error("Sharding cancelled because the required shard key index was not created.");
+  }
+
+  const createdIndex = createShardKeyIndex(
+    state,
+    databaseName,
+    collectionName,
+    shardKeyField,
+    shardKeyMode
+  );
+
+  console.log(`Created index '${createdIndex.indexName}' with key ${JSON.stringify(createdIndex.key)}.\n`);
+
+  return {
+    created: true,
+    key: createdIndex.key,
+    indexName: createdIndex.indexName
+  };
+}
+
 function getClusterOverview(state) {
   return runMongoJson(
     state,
-    state.topology.mongos.serviceName,
+    state.topology.queryRouter.serviceName,
     `
 const userDatabases = db
   .adminCommand({ listDatabases: 1 })
@@ -967,6 +2311,34 @@ function printCollectionOverview(overview) {
   console.log();
 }
 
+function printClusterDataSummary(overview) {
+  const databaseCount = overview.databases.length;
+  const collectionCount = overview.collections.length;
+
+  console.log("Data summary\n");
+  console.log(`Databases: ${databaseCount}`);
+  console.log(`Collections: ${collectionCount}\n`);
+
+  if (!databaseCount) {
+    console.log("No user databases found.\n");
+    return;
+  }
+
+  for (const databaseName of overview.databases) {
+    const collections = overview.collections
+      .filter((collection) => collection.db === databaseName)
+      .map((collection) => collection.name)
+      .sort((left, right) => left.localeCompare(right));
+
+    console.log(`- ${databaseName}: ${collections.length} collection(s)`);
+    if (collections.length) {
+      console.log(`  ${collections.join(", ")}`);
+    }
+  }
+
+  console.log();
+}
+
 function printBooksDemoIntroduction() {
   console.log("\nGuided demo: library.books\n");
   printDocsLink("Shard keys", DOCS.shardKey);
@@ -992,6 +2364,10 @@ function printBooksDemoIntroduction() {
 }
 
 function ensureMongosRunning(state) {
+  if (state.config.topology !== "sharded") {
+    throw new Error("Sharding exercises are only available for sharded clusters.");
+  }
+
   const containers = getComposeContainers(state);
   const mongos = containers.find((container) => container.Service === state.topology.mongos.serviceName);
 
@@ -1092,6 +2468,7 @@ async function promptCollectionTarget(overview) {
   return {
     databaseName,
     collectionName,
+    existingCollection: collectionAction.mode === "existing",
     alreadySharded,
     currentShardKey: collectionAction.collection?.shardKey ?? null
   };
@@ -1579,14 +2956,35 @@ function printShardDataPresence(databaseName, collectionName, shardPresence) {
 function printQuickstartPlan(config) {
   console.log("\nQuickstart mode\n");
   console.log("This command will:");
-  console.log(`- create a ${config.shardCount}-shard cluster`);
-  console.log(`- use ${config.replicaSetMembers} replica set members per shard`);
+  console.log(`- create a ${config.topology} cluster`);
+  if (config.topology === "sharded") {
+    console.log(`- use ${config.shardCount} shard(s)`);
+    console.log(`- use ${config.replicaSetMembers} replica set members per shard`);
+  } else if (config.topology === "replica-set") {
+    console.log(`- use ${config.replicaSetMembers} replica set members`);
+  }
   console.log(`- run MongoDB ${config.mongodbVersion}`);
-  console.log(`- expose mongos on localhost:${config.mongosPort}`);
-  console.log("- create the demo collection library.books");
-  console.log('- shard the collection by { "_id": "hashed" }');
-  console.log("- insert 500 sample documents");
-  console.log("- show how documents were distributed across shards\n");
+  console.log(`- expose MongoDB on localhost:${config.mongosPort}`);
+
+  if (config.features?.search) {
+    console.log("- enable MongoDB Search support");
+    if (config.topology === "standalone" || config.topology === "replica-set") {
+      console.log("- import sample_mflix");
+      console.log('- create the "default" Search index on sample_mflix.movies');
+      console.log('- run a $search query for "baseball"\n');
+      return;
+    }
+  }
+
+  if (config.topology === "sharded") {
+    console.log("- create the demo collection library.books");
+    console.log('- shard the collection by { "_id": "hashed" }');
+    console.log("- insert 500 sample documents");
+    console.log("- show how documents were distributed across shards\n");
+    return;
+  }
+
+  console.log("- create and start the cluster with no extra demo steps\n");
 }
 
 function printQuickstartSummary(result, inserted, distribution) {
@@ -1880,6 +3278,7 @@ async function runCustomCollectionFlow(state, overview, mode = "custom") {
 
   let currentDocumentCount = 0;
   let resetCollection = false;
+  let shardKeyCandidates = [];
 
   if (target.alreadySharded) {
     console.log(
@@ -1913,10 +3312,33 @@ async function runCustomCollectionFlow(state, overview, mode = "custom") {
         target.collectionName
       );
     }
+  } else {
+    currentDocumentCount = getCollectionDocumentCount(
+      state,
+      target.databaseName,
+      target.collectionName
+    );
+  }
+
+  if (currentDocumentCount > 0) {
+    shardKeyCandidates = getCollectionShardKeyCandidates(
+      state,
+      target.databaseName,
+      target.collectionName
+    );
+
+    console.log(
+      `\nFound ${currentDocumentCount} existing document(s) in ${target.databaseName}.${target.collectionName}.`
+    );
+    if (shardKeyCandidates.length) {
+      console.log(`Available shard key field candidates: ${shardKeyCandidates.join(", ")}\n`);
+    } else {
+      console.log("Could not infer field candidates from existing documents. You can enter a field manually.\n");
+    }
   }
 
   let answers;
-  let insertCount;
+  let insertCount = 0;
   while (true) {
     answers = await inquirer.prompt([
       {
@@ -1930,11 +3352,27 @@ async function runCustomCollectionFlow(state, overview, mode = "custom") {
         default: "continue"
       },
       {
-        type: "input",
+        type: shardKeyCandidates.length ? "list" : "input",
         name: "shardKeyField",
-        message: "Shard key field:",
-        default: "_id",
+        message: currentDocumentCount > 0 ? "Choose a shard key field from the existing collection:" : "Shard key field:",
+        choices: shardKeyCandidates.length
+          ? [
+              ...shardKeyCandidates.map((field) => ({ name: field, value: field })),
+              { name: "Enter a custom field", value: "__custom__" },
+              { name: "Back", value: "back" }
+            ]
+          : undefined,
+        default: shardKeyCandidates.length ? "_id" : "_id",
         when: (answers) => answers.continue === "continue",
+        validate: (value) =>
+          value.trim().toLowerCase() === "back" || value.trim() ? true : "Shard key field cannot be empty."
+      },
+      {
+        type: "input",
+        name: "customShardKeyField",
+        message: "Enter the shard key field:",
+        default: "_id",
+        when: (answers) => answers.continue === "continue" && answers.shardKeyField === "__custom__",
         validate: (value) =>
           value.trim().toLowerCase() === "back" || value.trim() ? true : "Shard key field cannot be empty."
       },
@@ -1953,7 +3391,9 @@ async function runCustomCollectionFlow(state, overview, mode = "custom") {
       {
         type: "list",
         name: "insertCountChoice",
-        message: "How many demo documents should be inserted?",
+        message: currentDocumentCount > 0
+          ? "How many extra demo documents should be inserted after sharding?"
+          : "How many demo documents should be inserted?",
         choices: [
           { name: "0 documents", value: 0 },
           { name: "20 documents", value: 20 },
@@ -1963,17 +3403,22 @@ async function runCustomCollectionFlow(state, overview, mode = "custom") {
           { name: "Back", value: "back" }
         ],
         default: mode === "demo" ? 20 : 0,
-        when: (answers) => answers.continue === "continue",
+        when: (answers) => answers.continue === "continue" && !target.existingCollection,
       }
     ]);
 
     if (
       answers.continue === "back" ||
       answers.shardKeyField?.trim?.().toLowerCase() === "back" ||
+      answers.customShardKeyField?.trim?.().toLowerCase() === "back" ||
       answers.shardKeyMode === "back" ||
       answers.insertCountChoice === "back"
     ) {
       return;
+    }
+
+    if (target.existingCollection) {
+      break;
     }
 
     if (answers.insertCountChoice !== "custom") {
@@ -2004,8 +3449,11 @@ async function runCustomCollectionFlow(state, overview, mode = "custom") {
   }
 
   if (target.alreadySharded) {
+    const selectedShardKeyField = answers.shardKeyField === "__custom__"
+      ? answers.customShardKeyField.trim()
+      : answers.shardKeyField.trim();
     const requestedShardKey = formatShardKey(
-      answers.shardKeyField.trim(),
+      selectedShardKeyField,
       answers.shardKeyMode
     );
     const currentShardKey = JSON.stringify(target.currentShardKey);
@@ -2020,32 +3468,51 @@ async function runCustomCollectionFlow(state, overview, mode = "custom") {
     }
   }
 
-  printInsertPlan(`${target.databaseName}.${target.collectionName}`, insertCount);
+  if (!target.existingCollection) {
+    printInsertPlan(`${target.databaseName}.${target.collectionName}`, insertCount);
+  }
+  const selectedShardKeyField = answers.shardKeyField === "__custom__"
+    ? answers.customShardKeyField.trim()
+    : answers.shardKeyField.trim();
+  if (!resetCollection && currentDocumentCount > 0) {
+    await ensureShardKeyIndex(
+      state,
+      target.databaseName,
+      target.collectionName,
+      selectedShardKeyField,
+      answers.shardKeyMode
+    );
+  }
+
   const result = shardCollection(state, {
     databaseName: target.databaseName,
     collectionName: target.collectionName,
-    shardKeyField: answers.shardKeyField.trim(),
+    shardKeyField: selectedShardKeyField,
     shardKeyMode: answers.shardKeyMode,
     documents: [],
     resetCollection,
     skipInsert: true
   });
-  const inserted = insertDocumentsInBatches(state, {
-    databaseName: target.databaseName,
-    collectionName: target.collectionName,
-    shardKeyField: answers.shardKeyField.trim(),
-    insertCount,
-    startIndex: currentDocumentCount,
-    seedMode: "sample-generated"
-  });
+  const inserted = target.existingCollection
+    ? 0
+    : insertDocumentsInBatches(state, {
+      databaseName: target.databaseName,
+      collectionName: target.collectionName,
+      shardKeyField: selectedShardKeyField,
+      insertCount,
+      startIndex: currentDocumentCount,
+      seedMode: "sample-generated"
+    });
 
   console.log("\nCollection updated\n");
   console.log(`Namespace: ${result.namespace}`);
   console.log(`Previous shard key: ${JSON.stringify(result.previousShardKey)}`);
   console.log(`Shard key: ${JSON.stringify(result.shardKey)}`);
   console.log(`Action: ${result.actionTaken}`);
-  console.log(`Documents inserted: ${inserted}`);
-  console.log("Insert completed.");
+  if (!target.existingCollection) {
+    console.log(`Documents inserted: ${inserted}`);
+    console.log("Insert completed.");
+  }
   console.log(`Shard result: ${JSON.stringify(result.shardResult)}\n`);
 }
 
@@ -2053,6 +3520,11 @@ async function interactiveShardingMenu() {
   const state = await loadState();
   if (!state) {
     console.log("\nNo cluster has been configured yet.\n");
+    return;
+  }
+
+  if (state.config.topology !== "sharded") {
+    console.log("\nSharding exercises are only available for sharded clusters.\n");
     return;
   }
 
@@ -2113,11 +3585,10 @@ async function interactiveShardingMenu() {
 }
 
 async function bringUpCluster(state) {
-  const totalSteps = 5;
-  const configServices = state.topology.configServers.map((member) => member.serviceName);
-  const shardServices = state.topology.shards.flatMap((shard) =>
-    shard.members.map((member) => member.serviceName)
-  );
+  const shouldImportSampleData = Boolean(state.config.sampleDatabases?.length);
+  const totalSteps = (state.config.topology === "sharded" ? 5 : 2) +
+    (shouldImportSampleData ? 1 : 0) +
+    (state.topology.search ? 1 : 0);
 
   console.log(
     "\nStarting cluster setup. If a step takes too long, you can interrupt with Ctrl+C and run 'up' again. The process is designed to retry safely.\n"
@@ -2130,65 +3601,121 @@ async function bringUpCluster(state) {
     "Creating the folders used by config servers, shard members, and logs."
   );
   await ensureDirectories(state.topology, state.config.storagePath);
+  if (shouldImportSampleData) {
+    ensureClusterSampleArchive(state);
+  }
 
-  printStep(
-    2,
-    totalSteps,
-    "Start MongoDB containers",
-    "Starting config server members and shard replica set members with Docker."
-  );
-  runCompose(state, ["up", "-d", ...configServices, ...shardServices]);
+  let nextStep = 2;
+  if (state.config.topology === "standalone") {
+    printStep(2, totalSteps, "Start standalone node", "Starting a single MongoDB node.");
+    runCompose(state, ["up", "-d", state.topology.standalone.serviceName]);
+    waitForMongo(state, state.topology.standalone.serviceName);
+    if (state.topology.search?.usesPrimaryNode) {
+      ensureSearchReplicaPrimary(state);
+    }
+    nextStep = 3;
+  } else if (state.config.topology === "replica-set") {
+    printStep(2, totalSteps, "Start replica set members", "Starting MongoDB replica set members.");
+    runCompose(state, ["up", "-d", ...state.topology.replicaSet.members.map((member) => member.serviceName)]);
+    waitForServices(state, state.topology.replicaSet.members.map((member) => member.serviceName));
+    printStep(3, totalSteps, "Initialize replica set", "Electing a primary for the replica set.");
+    runMongoScript(
+      state,
+      state.topology.replicaSet.members[0].serviceName,
+      buildReplicaInitScript(buildReplicaSetConfig(state.topology.replicaSet.name, state.topology.replicaSet.members))
+    );
+    if (state.topology.search?.usesPrimaryNode) {
+      ensureSearchReplicaPrimary(state);
+    }
+    nextStep = 4;
+  } else {
+    const configServices = state.topology.configServers.map((member) => member.serviceName);
+    const shardServices = state.topology.shards.flatMap((shard) =>
+      shard.members.map((member) => member.serviceName)
+    );
 
-  printStep(
-    3,
-    totalSteps,
-    "Initialize config server replica set",
-    "Waiting for config server members and creating the replica set that stores cluster metadata."
-  );
-  console.log(`Initializing config replica set '${state.config.configServerReplicaSet}'...`);
-  waitForServices(
-    state,
-    state.topology.configServers.map((member) => member.serviceName)
-  );
-  runMongoScript(
-    state,
-    state.topology.configServers[0].serviceName,
-    buildReplicaInitScript(
-      buildReplicaSetConfig(state.config.configServerReplicaSet, state.topology.configServers, {
-        configsvr: true
-      })
-    )
-  );
+    printStep(
+      2,
+      totalSteps,
+      "Start MongoDB containers",
+      "Starting config server members and shard replica set members with Docker."
+    );
+    runCompose(state, ["up", "-d", ...configServices, ...shardServices]);
 
-  printStep(
-    4,
-    totalSteps,
-    "Initialize shard replica sets",
-    "Waiting for shard members, then electing a primary in each shard replica set."
-  );
-  for (const shard of state.topology.shards) {
-    console.log(`Initializing shard replica set '${shard.replicaSet}'...`);
+    printStep(
+      3,
+      totalSteps,
+      "Initialize config server replica set",
+      "Waiting for config server members and creating the replica set that stores cluster metadata."
+    );
+    console.log(`Initializing config replica set '${state.config.configServerReplicaSet}'...`);
     waitForServices(
       state,
-      shard.members.map((member) => member.serviceName)
+      state.topology.configServers.map((member) => member.serviceName)
     );
     runMongoScript(
       state,
-      shard.members[0].serviceName,
-      buildReplicaInitScript(buildReplicaSetConfig(shard.replicaSet, shard.members))
+      state.topology.configServers[0].serviceName,
+      buildReplicaInitScript(
+        buildReplicaSetConfig(state.config.configServerReplicaSet, state.topology.configServers, {
+          configsvr: true
+        })
+      )
     );
+
+    printStep(
+      4,
+      totalSteps,
+      "Initialize shard replica sets",
+      "Waiting for shard members, then electing a primary in each shard replica set."
+    );
+    for (const shard of state.topology.shards) {
+      console.log(`Initializing shard replica set '${shard.replicaSet}'...`);
+      waitForServices(
+        state,
+        shard.members.map((member) => member.serviceName)
+      );
+      runMongoScript(
+        state,
+        shard.members[0].serviceName,
+        buildReplicaInitScript(buildReplicaSetConfig(shard.replicaSet, shard.members))
+      );
+    }
+
+    printStep(
+      5,
+      totalSteps,
+      "Start mongos and register shards",
+      "Starting the router, then attaching each shard replica set to the cluster."
+    );
+    console.log(`Starting mongos on port ${state.config.mongosPort}...`);
+    runCompose(state, ["up", "-d", state.topology.mongos.serviceName]);
+    waitForMongo(state, state.topology.mongos.serviceName);
+    runMongoScript(state, state.topology.mongos.serviceName, buildAddShardsScript(state.topology));
+    nextStep = 6;
   }
 
-  printStep(
-    5,
-    totalSteps,
-    "Start mongos and register shards",
-    "Starting the router, then attaching each shard replica set to the cluster."
-  );
-  console.log(`Starting mongos on port ${state.config.mongosPort}...`);
-  runCompose(state, ["up", "-d", state.topology.mongos.serviceName]);
-  waitForMongo(state, state.topology.mongos.serviceName);
-  runMongoScript(state, state.topology.mongos.serviceName, buildAddShardsScript(state.topology));
+  if (shouldImportSampleData) {
+    printStep(
+      nextStep,
+      totalSteps,
+      "Import sample databases",
+      `Restoring the selected sample databases into the ${state.config.topology} cluster.`
+    );
+    const counts = ensureClusterSampleDatabasesImported(state, state.config.sampleDatabases);
+    console.log(`Imported: ${counts.map((database) => `${database.databaseName} (${database.count})`).join(", ")}`);
+    nextStep += 1;
+  }
+
+  if (state.topology.search) {
+    printStep(
+      nextStep,
+      totalSteps,
+      "Start Search services",
+      "Enabling Search on the main MongoDB node and launching mongot in the same lab environment."
+    );
+    ensureSearchInfrastructure(state);
+  }
 }
 
 function sanitizeProjectName(value) {
@@ -2236,10 +3763,16 @@ async function createStateFromConfig(config, options = {}) {
     : await confirmAction(
       [
         "Create cluster with this topology?",
-        `Shards: ${config.shardCount}`,
-        `Members per shard: ${config.replicaSetMembers}`,
+        `Topology: ${config.topology}`,
+        ...(config.topology === "sharded"
+          ? [`Shards: ${config.shardCount}`, `Members per shard: ${config.replicaSetMembers}`]
+          : config.topology === "replica-set"
+            ? [`Replica set members: ${config.replicaSetMembers}`]
+            : []),
         `MongoDB version: ${config.mongodbVersion}`,
-        `mongos port: ${config.mongosPort}`,
+        `MongoDB port: ${config.mongosPort}`,
+        `Search support: ${config.features?.search ? "enabled" : "disabled"}`,
+        `Sample databases: ${(config.sampleDatabases ?? []).join(", ") || "none"}`,
         `Storage path: ${config.storagePath}`
       ].join("\n"),
       true
@@ -2286,6 +3819,10 @@ async function resolveStateForUp(options = {}) {
     ? buildQuickstartConfig(options)
     : await resolveUpConfig(options);
 
+  if (!desiredConfig) {
+    return null;
+  }
+
   if (!state) {
     return createStateFromConfig(desiredConfig, { confirm: !explicitOptions && !options.quickstart });
   }
@@ -2325,14 +3862,127 @@ async function runUp(options = {}) {
     return null;
   }
 
+  if (state.config.topology === "sharded" && state.config.features?.search) {
+    throw new Error("Search is not implemented on sharded clusters in this CLI yet. Recreate the cluster without Search or use standalone/replica-set.");
+  }
+
   await bringUpCluster(state);
 
   console.log("\nCluster ready\n");
   printTopologyDiagram(state);
-  console.log("Connection string:");
-  console.log(`mongodb://localhost:${state.config.mongosPort}`);
+  console.log("Connection strings:");
+  console.log(getPrimaryConnectionString(state));
+  if (state.config.topology === "replica-set") {
+    console.log(`Direct node access: ${getDirectConnectionString(state)}`);
+    if (state.config.features?.search) {
+      console.log("Replica set discovery for host clients is disabled when Search is enabled. Use direct node access.");
+    }
+  }
+  if (state.topology.search) {
+    console.log("Search is available on the main MongoDB connection above.");
+    console.log(`mongot: localhost:${state.topology.search.mongotPort}`);
+  }
   console.log("\nIf initialization is interrupted, rerunning 'up' will retry safely.\n");
   return state;
+}
+
+async function runSearchUp(options = {}) {
+  const existingState = await loadState();
+  if (!existingState) {
+    return runUp({ ...options, search: true });
+  }
+
+  if (existingState.config.topology === "sharded") {
+    throw new Error("Search is not implemented on sharded clusters in this CLI yet. Use standalone or replica-set.");
+  }
+
+  ensureSearchEnabled(existingState);
+  ensureDockerAvailable();
+  ensureSearchInfrastructure(existingState);
+  return existingState;
+}
+
+async function runSearchStatus() {
+  ensureDockerAvailable();
+  const state = await requireState();
+  ensureSearchEnabled(state);
+  printSearchStatus(state, getComposeContainers(state));
+}
+
+async function runSearchImportDatabases(options = {}) {
+  ensureDockerAvailable();
+  const state = await requireState();
+  ensureSearchEnabled(state);
+  ensureSearchInfrastructure(state);
+
+  const databaseNames = options.all
+    ? getAvailableSampleDatabases()
+    : options.databaseNames ?? state.config.sampleDatabases ?? [];
+
+  const counts = ensureSampleDatabasesImported(state, databaseNames);
+  if (databaseNames.length) {
+    state.config.sampleDatabases = [...new Set(databaseNames)];
+    await saveState(state);
+  }
+
+  console.log("\nImported sample databases\n");
+  for (const database of counts) {
+    console.log(`- ${database.databaseName}: ${database.count} documents`);
+  }
+  console.log("");
+}
+
+async function runSearchQuickstart(options = {}) {
+  const state = await runSearchUp(options);
+  if (!state) {
+    return;
+  }
+
+  const databaseName = "sample_mflix";
+  const collectionName = "movies";
+  const indexName = "default";
+  const query = "baseball";
+  const pathName = "plot";
+
+  printStep(1, 3, "Import sample data", "Importing sample_mflix into the main MongoDB node with Search enabled.");
+  await runSearchImportDatabases({ databaseNames: [databaseName] });
+
+  printStep(2, 3, "Create Search index", "Creating the default Search index on sample_mflix.movies.");
+  waitForSearchRuntime(state);
+  const indexResult = waitForSearchIndexManagement(state, databaseName, collectionName, indexName);
+
+  printStep(3, 3, "Run Search query", "Running a sample $search query for 'baseball'.");
+  const documents = waitForSearchQuery(state, databaseName, collectionName, query, pathName);
+
+  console.log("\nMongoDB Search quickstart completed\n");
+  console.log(`Index action: ${indexResult.action}`);
+  console.log(`Namespace: ${databaseName}.${collectionName}`);
+  console.log(`Search index: ${indexName}\n`);
+  console.log("Sample results:\n");
+  for (const document of documents) {
+    console.log(JSON.stringify(document, null, 2));
+  }
+  console.log("\nTry this query in mongosh:\n");
+  console.log(`use ${databaseName}`);
+  console.log("db.movies.aggregate([");
+  console.log("  {");
+  console.log("    $search: {");
+  console.log("      text: {");
+  console.log('        query: "baseball",');
+  console.log('        path: "plot"');
+  console.log("      }");
+  console.log("    }");
+  console.log("  },");
+  console.log("  { $limit: 5 },");
+  console.log("  {");
+  console.log("    $project: {");
+  console.log("      _id: 0,");
+  console.log("      title: 1,");
+  console.log("      plot: 1");
+  console.log("    }");
+  console.log("  }");
+  console.log("])\n");
+  console.log(`Connect with: mongosh "${state.config.topology === "replica-set" ? getDirectConnectionString(state) : getPrimaryConnectionString(state)}"\n`);
 }
 
 async function runDown() {
@@ -2394,6 +4044,8 @@ async function showNodeDetails() {
   printTopologyDiagram(state);
   printReplicaSetHealth(state, containers);
   printTopologyDetails(state, containers);
+  const overview = getClusterOverview(state);
+  printClusterDataSummary(overview);
   printContainersTable(containers);
 }
 
@@ -2414,12 +4066,12 @@ async function interactiveClusterMenu() {
       {
         type: "list",
         name: "action",
-        message: `Step 4: Manage the cluster lifecycle\n${runningCount}/${countExpectedNodes(state)} nodes are currently running`,
+        message: `Manage cluster\n${runningCount}/${countExpectedNodes(state)} nodes are currently running`,
         choices: [
-          { name: "1. Show summary and node list (see the current topology)", value: "show" },
-          { name: "2. Start cluster (bring containers up)", value: "up" },
-          { name: "3. Stop cluster (bring containers down)", value: "down" },
-          { name: "4. Delete cluster and files (remove local lab data)", value: "clean" },
+          { name: "1. Show cluster details", value: "show" },
+          { name: "2. Start cluster", value: "up" },
+          { name: "3. Stop cluster", value: "down" },
+          { name: "4. Delete cluster and files", value: "clean" },
           { name: "5. Back", value: "back" }
         ],
         default: "show"
@@ -2455,6 +4107,164 @@ async function interactiveClusterMenu() {
   }
 }
 
+async function promptSearchDatabaseSelection() {
+  const availableDatabases = getAvailableSampleDatabases();
+  const noneValue = "__none__";
+  const allValue = "__all__";
+
+  const { selections } = await inquirer.prompt([
+    {
+      type: "checkbox",
+      name: "selections",
+      message: "Choose which sample databases to import into the Search lab",
+      choices: [
+        { name: "None", value: noneValue },
+        { name: "All available sample databases", value: allValue },
+        ...availableDatabases.map((database) => ({
+          name: database,
+          value: database
+        }))
+      ],
+      validate(value) {
+        return value.length > 0 ? true : "Select at least one database to continue.";
+      }
+    }
+  ]);
+
+  if (selections.includes(noneValue)) {
+    return {
+      all: false,
+      databaseNames: []
+    };
+  }
+
+  if (selections.includes(allValue)) {
+    return {
+      all: true,
+      databaseNames: [...availableDatabases]
+    };
+  }
+
+  return {
+    all: false,
+    databaseNames: selections
+  };
+}
+
+async function interactiveSearchMenu() {
+  let exitMenu = false;
+
+  while (!exitMenu) {
+    const { action } = await inquirer.prompt([
+      {
+        type: "list",
+        name: "action",
+        message: "Search\nUse the Search services attached to this cluster",
+        choices: [
+          { name: "1. Start Search services", value: "up" },
+          { name: "2. Show Search status", value: "status" },
+          { name: "3. Import sample databases", value: "import" },
+          { name: "4. Run Search quickstart demo", value: "quickstart" },
+          { name: "5. Back", value: "back" }
+        ],
+        default: "up"
+      }
+    ]);
+
+    if (action === "up") {
+      await runSearchUp();
+      continue;
+    }
+
+    if (action === "status") {
+      await runSearchStatus();
+      continue;
+    }
+
+    if (action === "import") {
+      const selection = await promptSearchDatabaseSelection();
+      await runSearchImportDatabases(selection);
+      continue;
+    }
+
+    if (action === "quickstart") {
+      await runSearchQuickstart();
+      continue;
+    }
+
+    exitMenu = true;
+  }
+}
+
+function parseMongoMajorMinor(version) {
+  const match = String(version ?? "").match(/^(\d+)(?:\.(\d+))?/);
+  if (!match) {
+    return null;
+  }
+
+  return {
+    major: Number(match[1]),
+    minor: Number(match[2] ?? 0)
+  };
+}
+
+function supportsSearchVersion(version) {
+  const parsed = parseMongoMajorMinor(version);
+  if (!parsed) {
+    return false;
+  }
+
+  return parsed.major > 8 || (parsed.major === 8 && parsed.minor >= 2);
+}
+
+async function ensureClusterReadyForSearch() {
+  const state = await loadState();
+
+  if (!state) {
+    console.log("\nSet up a cluster first. MongoDB Search requires a configured lab environment.\n");
+    return false;
+  }
+
+  if (!supportsSearchVersion(state.config.mongodbVersion)) {
+    console.log(
+      [
+        "",
+        `Search lab requires MongoDB 8.2 or newer.`,
+        `Current cluster version: ${state.config.mongodbVersion}`,
+        "Set up the cluster again with MongoDB 8.2+ before using Search.",
+        ""
+      ].join("\n")
+    );
+    return false;
+  }
+
+  if (!state.config.features?.search) {
+    console.log(
+      [
+        "",
+        "This cluster was created without Search support.",
+        "Set up the cluster again with Search enabled before using the Search menu.",
+        ""
+      ].join("\n")
+    );
+    return false;
+  }
+
+  if (state.config.topology === "sharded") {
+    console.log(
+      [
+        "",
+        "Search is not enabled for sharded clusters in this CLI yet.",
+        "Use a standalone or replica-set topology for Search support for now.",
+        ""
+      ].join("\n")
+    );
+    return false;
+  }
+
+  return true;
+}
+
 async function interactiveMainMenu() {
   ensureDockerAvailable();
 
@@ -2464,21 +4274,21 @@ async function interactiveMainMenu() {
     const activeState = await loadActiveClusterState();
     const savedState = activeState ?? await loadState();
     const stateLabel = activeState
-      ? `Active cluster: ${activeState.config.shardCount} shard(s), ${activeState.config.replicaSetMembers} member(s) each`
+      ? `${activeState.config.topology} cluster ready on MongoDB ${activeState.config.mongodbVersion}${activeState.config.features?.search ? " with Search" : ""}`
       : savedState
-        ? "No cluster running right now"
+        ? `${savedState.config.topology} cluster saved with MongoDB ${savedState.config.mongodbVersion}${savedState.config.features?.search ? " and Search support" : ""}`
         : "No cluster configured yet";
 
     const { action } = await inquirer.prompt([
       {
         type: "list",
         name: "action",
-        message: `MongoDB CLI Lab\n${stateLabel}\nChoose the next step in the lab`,
+        message: `MongoDB CLI Lab\n${stateLabel}\nChoose what you want to do next`,
         choices: [
-          { name: "1. Create or start cluster (infrastructure setup)", value: "up" },
-          { name: "2. Show cluster status and nodes (understand the topology)", value: "status" },
-          { name: "3. Collections and sharding (learn with data)", value: "collections" },
-          { name: "4. Manage cluster (stop, restart, or delete)", value: "manage" },
+          { name: "1. Set up cluster", value: "up" },
+          { name: "2. Search lab", value: "search" },
+          { name: "3. Work with data and sharding", value: "collections" },
+          { name: "4. Manage cluster", value: "manage" },
           { name: "5. Exit", value: "exit" }
         ],
         default: "up"
@@ -2490,9 +4300,11 @@ async function interactiveMainMenu() {
       continue;
     }
 
-    if (action === "status") {
+    if (action === "search") {
       try {
-        await runStatus();
+        if (await ensureClusterReadyForSearch()) {
+          await interactiveSearchMenu();
+        }
       } catch (error) {
         console.log(`\n${error.message}\n`);
       }
@@ -2535,7 +4347,17 @@ async function runQuickstart(options = {}) {
     return;
   }
 
-  await runQuickstartDemo(state);
+  if (state.config.features?.search && (state.config.topology === "standalone" || state.config.topology === "replica-set")) {
+    await runSearchQuickstart({ ...options, confirm: false });
+    return;
+  }
+
+  if (state.config.topology === "sharded") {
+    await runQuickstartDemo(state);
+    return;
+  }
+
+  console.log("\nQuickstart setup completed\n");
 }
 
 export {
@@ -2543,6 +4365,10 @@ export {
   runClean,
   runDown,
   runQuickstart,
+  runSearchImportDatabases,
+  runSearchQuickstart,
+  runSearchStatus,
+  runSearchUp,
   runStatus,
   runUp
 };
