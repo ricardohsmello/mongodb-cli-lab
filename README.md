@@ -3,12 +3,15 @@
 [![npm version](https://img.shields.io/npm/v/@ricardohsmello/mongodb-cli-lab)](https://www.npmjs.com/package/@ricardohsmello/mongodb-cli-lab)
 [![npm downloads](https://img.shields.io/npm/dm/@ricardohsmello/mongodb-cli-lab)](https://www.npmjs.com/package/@ricardohsmello/mongodb-cli-lab)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Node.js](https://img.shields.io/badge/node-%3E%3D18-brightgreen)](https://nodejs.org)
 
 > A Node.js CLI to spin up local MongoDB labs with Docker — standalone, replica set, sharded cluster, and MongoDB Search.
 
-Intended for local development, demos, testing, and learning. **Not for production use.**
+⚠️ **Disclaimer**
 
+This is an independent project and is **not an official MongoDB product**.  
+It is intended for **local development, demos, testing, and learning purposes only**.
+
+**Do not use this tool in production environments.**
 ---
 
 ## Table of Contents
