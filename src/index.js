@@ -14,6 +14,15 @@ import {
   hasExplicitUpOptions,
   resolveUpConfig
 } from "./lib/config.js";
+import {
+  getQueryableEncryptionCompatibilityError,
+  interactiveQueryableEncryptionMenu,
+  printQueryableEncryptionResources,
+  printQueryableEncryptionQuickstartPlan,
+  runQueryableEncryptionQuickstart as runQueryableEncryptionQuickstartLab,
+  runQueryableEncryptionSetup as runQueryableEncryptionSetupLab,
+  runQueryableEncryptionStatus as runQueryableEncryptionStatusLab
+} from "./lib/queryable-encryption.js";
 
 const DEFAULT_STORAGE_PATH = "./mongodb-cli-lab";
 const DEFAULT_PROJECT_NAME = "mongodb-cli-lab";
@@ -43,6 +52,9 @@ const DOCS = {
   deployStandalone: "https://www.mongodb.com/docs/ops-manager/current/tutorial/deploy-standalone/?utm_campaign=devrel&utm_source=third-part-content&utm_medium=cta&utm_content=mongodb-cli-lab&utm_term=ricardo.mello",
   deployReplicaSet: "https://www.mongodb.com/docs/ops-manager/current/tutorial/deploy-replica-set/?utm_campaign=devrel&utm_source=third-part-content&utm_medium=cta&utm_content=mongodb-cli-lab&utm_term=ricardo.mello",
   deployShardedCluster: "https://www.mongodb.com/docs/manual/tutorial/deploy-shard-cluster/?utm_campaign=devrel&utm_source=third-part-content&utm_medium=cta&utm_content=mongodb-cli-lab&utm_term=ricardo.mello",
+  queryableEncryption: "https://www.mongodb.com/docs/manual/core/queryable-encryption/?utm_campaign=devrel&utm_source=third-part-content&utm_medium=cta&utm_content=mongodb-cli-lab&utm_term=ricardo.mello",
+  securityInUseEncryption: "https://www.mongodb.com/docs/manual/core/security-in-use-encryption/?utm_campaign=devrel&utm_source=third-part-content&utm_medium=cta&utm_content=mongodb-cli-lab&utm_term=ricardo.mello",
+  queryableEncryptionSpringData: "https://dev.to/mongodb/queryable-encryption-with-spring-data-mongodb-how-to-query-encrypted-fields-2ccc?utm_campaign=devrel&utm_source=third-part-content&utm_medium=cta&utm_content=mongodb-cli-lab&utm_term=ricardo.mello",
   atlasSearchManageIndexes: "https://www.mongodb.com/docs/atlas/atlas-search/manage-indexes/?utm_campaign=devrel&utm_source=third-part-content&utm_medium=cta&utm_content=mongodb-cli-lab&utm_term=ricardo.mello",
   atlasSearchProduct: "https://www.mongodb.com/products/platform/atlas-search?utm_campaign=devrel&utm_source=third-part-content&utm_medium=cta&utm_content=mongodb-cli-lab&utm_term=ricardo.mello",
   atlasSearchTutorial: "https://www.mongodb.com/docs/atlas/atlas-search/tutorial/?utm_campaign=devrel&utm_source=third-part-content&utm_medium=cta&utm_content=mongodb-cli-lab&utm_term=ricardo.mello",
@@ -878,7 +890,30 @@ async function tryReadStateFile(stateFilePath) {
   }
 
   const raw = await fs.readFile(stateFilePath, "utf8");
-  return JSON.parse(raw);
+  return normalizeLoadedState(JSON.parse(raw));
+}
+
+function normalizeLoadedState(state) {
+  if (!state?.config) {
+    return state;
+  }
+
+  const needsTopologyRebuild = (
+    !state.topology
+    || (state.config.topology === "replica-set" && !state.topology.replicaSet)
+    || (state.config.topology === "standalone" && !state.topology.standalone)
+    || (state.config.topology === "sharded" && (!state.topology.shards || !state.topology.configServers))
+    || (Boolean(state.config.features?.search) && !state.topology.search)
+  );
+
+  if (!needsTopologyRebuild) {
+    return state;
+  }
+
+  return {
+    ...state,
+    topology: buildTopology(state.config)
+  };
 }
 
 function tryRunCommand(command, args, options = {}) {
@@ -956,14 +991,14 @@ async function loadStateFromStoragePath(storagePath) {
     fs.readFile(topologyFile, "utf8")
   ]);
 
-  return {
+  return normalizeLoadedState({
     projectName: sanitizeProjectName(DEFAULT_PROJECT_NAME),
     config: JSON.parse(configRaw),
     topology: JSON.parse(topologyRaw),
     composeFile,
     clusterConfigFile,
     topologyFile
-  };
+  });
 }
 
 async function discoverStateFromDocker() {
@@ -1636,10 +1671,20 @@ function ensureSampleArchiveMountedOnService(state, serviceName) {
   }
 }
 
+function getWritableMongoServiceName(state) {
+  if (state.config.topology === "replica-set") {
+    return getReplicaSetPrimaryMember(state)?.serviceName ?? state.topology.replicaSet.members[0].serviceName;
+  }
+
+  if (state.config.topology === "standalone") {
+    return state.topology.standalone.serviceName;
+  }
+
+  return state.topology.queryRouter.serviceName;
+}
+
 function getClusterSampleDatabaseCounts(state, databaseNames) {
-  const serviceName = state.config.topology === "replica-set"
-    ? getSearchMongoServiceName(state, { writablePrimary: true })
-    : state.topology.queryRouter.serviceName;
+  const serviceName = getWritableMongoServiceName(state);
 
   return databaseNames.map((databaseName) => ({
     databaseName,
@@ -1674,9 +1719,7 @@ function ensureClusterSampleDatabasesImported(state, requestedDatabases) {
     ensureSampleArchiveMountedOnService(state, state.topology.queryRouter.serviceName);
   }
 
-  const restoreServiceName = state.config.topology === "replica-set"
-    ? getSearchMongoServiceName(state, { writablePrimary: true })
-    : state.topology.queryRouter.serviceName;
+  const restoreServiceName = getWritableMongoServiceName(state);
 
   try {
     const counts = getClusterSampleDatabaseCounts(state, selectedDatabases);
@@ -2611,6 +2654,12 @@ function printClusterSetupIntroduction() {
   console.log("\nSet up cluster\n");
   console.log("Helpful references before choosing a topology:\n");
   printClusterSetupResources();
+}
+
+function printQueryableEncryptionIntroduction() {
+  console.log("\nQueryable Encryption lab\n");
+  console.log("Helpful references before using Queryable Encryption:\n");
+  printQueryableEncryptionResources();
 }
 
 function printInsertPlan(label, insertCount) {
@@ -4070,6 +4119,65 @@ async function runSearchQuickstart(options = {}) {
   printSearchResources();
 }
 
+async function runQueryableEncryptionQuickstart(options = {}) {
+  const previewState = {
+    config: buildQuickstartConfig({
+      topology: "replica-set",
+      replicas: 3,
+      mongodbVersion: "8.2",
+      ...options
+    })
+  };
+  printQueryableEncryptionQuickstartPlan(previewState);
+
+  const confirmed = await confirmAction("Proceed with the Queryable Encryption quickstart?", true);
+  if (!confirmed) {
+    console.log("\nQueryable Encryption quickstart cancelled.\n");
+    return;
+  }
+
+  let state = await loadActiveClusterState();
+  if (!state) {
+    const savedState = await loadState();
+    const qeCompatibilityError = getQueryableEncryptionCompatibilityError(savedState);
+
+    if (savedState && !qeCompatibilityError) {
+      ensureDockerAvailable();
+      await bringUpCluster(savedState);
+      state = savedState;
+    }
+  }
+
+  if (!state) {
+    state = await runUp({
+      topology: "replica-set",
+      replicas: 3,
+      mongodbVersion: "8.2",
+      quickstart: true,
+      ...options
+    });
+  }
+
+  if (!state) {
+    return;
+  }
+
+  const qeCompatibilityError = getQueryableEncryptionCompatibilityError(state);
+  if (qeCompatibilityError) {
+    throw new Error(`${qeCompatibilityError} Run 'mongodb-cli-lab up --topology replica-set --replicas 3 --mongodb-version 8.2' first, or remove the current saved config.`);
+  }
+
+  await runQueryableEncryptionQuickstartLab(state);
+}
+
+async function runQueryableEncryptionSetup() {
+  await runQueryableEncryptionSetupLab(await loadState());
+}
+
+async function runQueryableEncryptionStatus() {
+  await runQueryableEncryptionStatusLab(await loadState());
+}
+
 async function runDown() {
   ensureDockerAvailable();
   const state = await requireState();
@@ -4373,10 +4481,11 @@ async function interactiveMainMenu() {
         message: `MongoDB CLI Lab\n${stateLabel}\nChoose what you want to do next`,
         choices: [
           { name: "1. Set up cluster", value: "up" },
-          { name: "2. Search lab", value: "search" },
-          { name: "3. Work with data and sharding", value: "collections" },
-          { name: "4. Manage cluster", value: "manage" },
-          { name: "5. Exit", value: "exit" }
+          { name: "2. Manage cluster", value: "manage" },
+          { name: "3. MongoDB Search lab", value: "search" },
+          { name: "4. Queryable Encryption lab", value: "qe" },
+          { name: "5. Sharding lab", value: "collections"  },
+          { name: "6. Exit", value: "exit" }
         ],
         default: "up"
       }
@@ -4394,6 +4503,22 @@ async function interactiveMainMenu() {
       try {
         if (await ensureClusterReadyForSearch()) {
           await interactiveSearchMenu();
+        }
+      } catch (error) {
+        console.log(`\n${error.message}\n`);
+      }
+      continue;
+    }
+
+    if (action === "qe") {
+      try {
+        const state = await loadState();
+        printQueryableEncryptionIntroduction();
+        const qeCompatibilityError = getQueryableEncryptionCompatibilityError(state);
+        if (qeCompatibilityError) {
+          console.log(`\n${qeCompatibilityError}\n`);
+        } else {
+          await interactiveQueryableEncryptionMenu(state);
         }
       } catch (error) {
         console.log(`\n${error.message}\n`);
@@ -4452,9 +4577,13 @@ async function runQuickstart(options = {}) {
 
 export {
   interactiveMainMenu,
+  loadState,
   runClean,
   runDown,
   runQuickstart,
+  runQueryableEncryptionQuickstart,
+  runQueryableEncryptionSetup,
+  runQueryableEncryptionStatus,
   runSearchImportDatabases,
   runSearchQuickstart,
   runSearchStatus,

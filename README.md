@@ -4,7 +4,7 @@
 [![npm downloads](https://img.shields.io/npm/dm/@ricardohsmello/mongodb-cli-lab)](https://www.npmjs.com/package/@ricardohsmello/mongodb-cli-lab)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-> A Node.js CLI to spin up local MongoDB labs with Docker — standalone, replica set, sharded cluster, and MongoDB Search.
+> A Node.js CLI to spin up local MongoDB labs with Docker — standalone, replica set, sharded cluster, MongoDB Search, and Queryable Encryption labs.
 
 **⚠️ Disclaimer**
 
@@ -37,7 +37,8 @@ This is an independent project and is **not an official MongoDB product**. It is
 - Replica set
 - Sharded cluster
 - MongoDB Search on `standalone` and `replica-set`
-- Quickstart scripts for sharding and Search flows
+- Queryable Encryption lab on `replica-set`
+- Quickstart scripts for sharding, Search, and Queryable Encryption flows
 - Sample database loading (`--sample-databases`)
 
 ---
@@ -77,6 +78,7 @@ mongodb-cli-lab
 From the menu you can:
 - Set up a cluster (standalone, replica set, or sharded)
 - Open the Search lab
+- Open the Queryable Encryption lab
 - Work with data and sharding
 - Manage the cluster lifecycle
 
@@ -90,6 +92,9 @@ From the menu you can:
 | `mongodb-cli-lab down`    | Stop the running lab                             |
 | `mongodb-cli-lab clean`   | Remove all lab containers and volumes            |
 | `mongodb-cli-lab quickstart` | Run a quickstart script for the given topology |
+| `mongodb-cli-lab qe quickstart` | Run the Queryable Encryption quickstart on the current cluster |
+| `mongodb-cli-lab qe setup` | Create a custom Queryable Encryption demo collection |
+| `mongodb-cli-lab qe status` | Show Queryable Encryption lab status |
 
 ### Options
 
@@ -141,6 +146,12 @@ Search quickstart:
 mongodb-cli-lab quickstart --topology replica-set --replicas 3 --search --mongodb-version 8.2 --port 28000
 ```
 
+Queryable Encryption quickstart on the current cluster:
+
+```bash
+mongodb-cli-lab qe quickstart
+```
+
 ### Sharded Cluster
 
 Basic:
@@ -162,6 +173,8 @@ mongodb-cli-lab quickstart --topology sharded --shards 2 --replicas 3 --mongodb-
 ```
 
 > **Note:** MongoDB Search is only supported on `standalone` and `replica-set` topologies.
+>
+> **Note:** Queryable Encryption lab is currently supported on `replica-set` topologies and uses a local KMS demo setup.
 
 ---
 
@@ -174,4 +187,5 @@ mongodb-cli-lab quickstart --help
 mongodb-cli-lab search --help
 mongodb-cli-lab search up --help
 mongodb-cli-lab search quickstart --help
+mongodb-cli-lab qe --help
 ```
