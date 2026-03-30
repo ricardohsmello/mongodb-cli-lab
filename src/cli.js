@@ -2,6 +2,7 @@
 
 import process from "node:process";
 import { Command, InvalidArgumentError } from "commander";
+import packageJson from "../package.json" with { type: "json" };
 import {
   interactiveMainMenu,
   runClean,
@@ -88,7 +89,7 @@ const program = new Command();
 program
   .name("mongodb-cli-lab")
   .description("CLI to spin up local MongoDB labs with Docker")
-  .version("1.0.1")
+  .version(packageJson.version)
   .addHelpText(
     "after",
     `

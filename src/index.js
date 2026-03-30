@@ -583,12 +583,17 @@ function generateComposeFile(config, topology) {
 }
 
 function buildReplicaSetConfig(replicaSet, members, options = {}) {
+  const preferFirstNode = options.primaryElectionBehavior === "prefer-first-node" && !options.configsvr;
+
   return {
     _id: replicaSet,
     ...(options.configsvr ? { configsvr: true } : {}),
     members: members.map((member, index) => ({
       _id: index,
-      host: member.advertisedHost ?? `${member.serviceName}:${INTERNAL_MONGO_PORT}`
+      host: member.advertisedHost ?? `${member.serviceName}:${INTERNAL_MONGO_PORT}`,
+      ...(preferFirstNode
+        ? { priority: index === 0 ? 2 : 1 }
+        : {})
     }))
   };
 }
@@ -1362,6 +1367,12 @@ function printStep(stepNumber, totalSteps, title, description) {
   if (description) {
     console.log(description);
   }
+}
+
+function formatPrimaryElectionBehavior(value) {
+  return value === "prefer-first-node"
+    ? "Prefer first node as primary"
+    : "Use equal priority on all nodes";
 }
 
 function getPrimaryConnectionString(state) {
@@ -3665,7 +3676,11 @@ async function bringUpCluster(state) {
     runMongoScript(
       state,
       state.topology.replicaSet.members[0].serviceName,
-      buildReplicaInitScript(buildReplicaSetConfig(state.topology.replicaSet.name, state.topology.replicaSet.members))
+      buildReplicaInitScript(
+        buildReplicaSetConfig(state.topology.replicaSet.name, state.topology.replicaSet.members, {
+          primaryElectionBehavior: state.config.primaryElectionBehavior
+        })
+      )
     );
     if (state.topology.search?.usesPrimaryNode) {
       ensureSearchReplicaPrimary(state);
@@ -3721,7 +3736,11 @@ async function bringUpCluster(state) {
       runMongoScript(
         state,
         shard.members[0].serviceName,
-        buildReplicaInitScript(buildReplicaSetConfig(shard.replicaSet, shard.members))
+        buildReplicaInitScript(
+          buildReplicaSetConfig(shard.replicaSet, shard.members, {
+            primaryElectionBehavior: state.config.primaryElectionBehavior
+          })
+        )
       );
     }
 
@@ -3808,9 +3827,16 @@ async function createStateFromConfig(config, options = {}) {
         "Create cluster with this topology?",
         `Topology: ${config.topology}`,
         ...(config.topology === "sharded"
-          ? [`Shards: ${config.shardCount}`, `Members per shard: ${config.replicaSetMembers}`]
+          ? [
+              `Shards: ${config.shardCount}`,
+              `Members per shard: ${config.replicaSetMembers}`,
+              `Primary election behavior: ${formatPrimaryElectionBehavior(config.primaryElectionBehavior)}`
+            ]
           : config.topology === "replica-set"
-            ? [`Replica set members: ${config.replicaSetMembers}`]
+            ? [
+                `Replica set members: ${config.replicaSetMembers}`,
+                `Primary election behavior: ${formatPrimaryElectionBehavior(config.primaryElectionBehavior)}`
+              ]
             : []),
         `MongoDB version: ${config.mongodbVersion}`,
         `MongoDB port: ${config.mongosPort}`,
@@ -3913,16 +3939,30 @@ async function runUp(options = {}) {
 
   console.log("\nCluster ready\n");
   printTopologyDiagram(state);
-  console.log("Connection strings:");
-  console.log(getPrimaryConnectionString(state));
   if (state.config.topology === "replica-set") {
-    console.log(`Direct node access: ${getDirectConnectionString(state)}`);
-    if (state.config.features?.search) {
-      console.log("Replica set discovery for host clients is disabled when Search is enabled. Use direct node access.");
+    const primaryMember = getReplicaSetPrimaryMember(state);
+    const replicaSetConnectionString = state.config.features?.search
+      ? getDirectConnectionString(state)
+      : getPrimaryConnectionString(state);
+
+    console.log(`Replica set connection: ${replicaSetConnectionString}`);
+    if (primaryMember) {
+      console.log(`- node ${primaryMember.hostPort} = PRIMARY`);
     }
+
+    for (const member of state.topology.replicaSet.members) {
+      if (member.serviceName === primaryMember?.serviceName) {
+        continue;
+      }
+
+      console.log(`- node ${member.hostPort} = SECONDARY`);
+    }
+    console.log(`Direct node access: ${getDirectConnectionString(state)}`);
+  } else {
+    console.log("Connection string:");
+    console.log(getPrimaryConnectionString(state));
   }
   if (state.topology.search) {
-    console.log("Search is available on the main MongoDB connection above.");
     console.log(`mongot: localhost:${state.topology.search.mongotPort}`);
   }
   console.log("\nIf initialization is interrupted, rerunning 'up' will retry safely.\n");

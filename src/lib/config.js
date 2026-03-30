@@ -23,6 +23,7 @@ export const DEFAULT_UP_OPTIONS = Object.freeze({
   topology: "standalone",
   shards: 2,
   replicas: 3,
+  primaryElectionBehavior: "prefer-first-node",
   mongodbVersion: "8.2",
   port: 28000,
   storagePath: DEFAULT_STORAGE_PATH,
@@ -90,6 +91,9 @@ function normalizeClusterConfig(config) {
     topology,
     shardCount,
     replicaSetMembers,
+    primaryElectionBehavior: topology === "standalone"
+      ? "default"
+      : (config.primaryElectionBehavior ?? DEFAULT_UP_OPTIONS.primaryElectionBehavior),
     mongodbVersion: config.mongodbVersion,
     mongosPort: config.mongosPort,
     storagePath: path.resolve(process.cwd(), config.storagePath),
@@ -116,6 +120,7 @@ export function hasExplicitUpOptions(options = {}) {
     "topology",
     "shards",
     "replicas",
+    "primaryElectionBehavior",
     "mongodbVersion",
     "port",
     "storagePath",
@@ -132,6 +137,7 @@ export function buildQuickstartConfig(overrides = {}) {
     topology: overrides.topology ?? DEFAULT_UP_OPTIONS.topology,
     shardCount: overrides.shards ?? DEFAULT_UP_OPTIONS.shards,
     replicaSetMembers: overrides.replicas ?? DEFAULT_UP_OPTIONS.replicas,
+    primaryElectionBehavior: overrides.primaryElectionBehavior ?? DEFAULT_UP_OPTIONS.primaryElectionBehavior,
     mongodbVersion: overrides.mongodbVersion ?? DEFAULT_UP_OPTIONS.mongodbVersion,
     mongosPort: overrides.port ?? DEFAULT_UP_OPTIONS.port,
     storagePath: overrides.storagePath ?? DEFAULT_UP_OPTIONS.storagePath,
@@ -148,6 +154,7 @@ export function configsMatch(left, right) {
     left.topology === right.topology &&
     left.shardCount === right.shardCount &&
     left.replicaSetMembers === right.replicaSetMembers &&
+    left.primaryElectionBehavior === right.primaryElectionBehavior &&
     left.mongodbVersion === right.mongodbVersion &&
     left.mongosPort === right.mongosPort &&
     Boolean(left.features?.search) === Boolean(right.features?.search) &&
@@ -215,6 +222,10 @@ async function promptForMissingValues(partialConfig) {
 
     if (!hasValue(partialConfig.replicaSetMembers) && topology !== "standalone") {
       steps.push("replicaSetMembers");
+    }
+
+    if (!hasValue(partialConfig.primaryElectionBehavior) && topology !== "standalone") {
+      steps.push("primaryElectionBehavior");
     }
 
     if (!hasValue(partialConfig.mongodbVersion)) {
@@ -384,6 +395,40 @@ async function promptForMissingValues(partialConfig) {
         promptedValues.replicaSetMembers = replicaSetMembers;
       }
 
+      stepIndex += 1;
+      continue;
+    }
+
+    if (step === "primaryElectionBehavior") {
+      const choices = [
+        { name: "Prefer first node as primary (recommended)", value: "prefer-first-node" },
+        { name: "Use equal priority on all nodes", value: "default" },
+        { name: "Back", value: backSelection }
+      ];
+      const { primaryElectionBehavior } = await inquirer.prompt([
+        {
+          type: "list",
+          name: "primaryElectionBehavior",
+          message: "Primary election behavior?",
+          choices,
+          default: getChoiceDefaultIndex(
+            choices,
+            resolvePromptValue(
+              promptedValues,
+              partialConfig,
+              "primaryElectionBehavior",
+              DEFAULT_UP_OPTIONS.primaryElectionBehavior
+            )
+          )
+        }
+      ]);
+
+      if (primaryElectionBehavior === backSelection) {
+        stepIndex -= 1;
+        continue;
+      }
+
+      promptedValues.primaryElectionBehavior = primaryElectionBehavior;
       stepIndex += 1;
       continue;
     }
@@ -589,6 +634,7 @@ export async function resolveUpConfig(options = {}) {
     topology: options.topology,
     shardCount: options.shards,
     replicaSetMembers: options.replicas,
+    primaryElectionBehavior: options.primaryElectionBehavior,
     mongodbVersion: options.mongodbVersion,
     mongosPort: options.port,
     storagePath: options.storagePath ?? DEFAULT_UP_OPTIONS.storagePath,
@@ -608,6 +654,7 @@ export async function resolveUpConfig(options = {}) {
     topology: promptedValues.topology ?? partialConfig.topology,
     shardCount: promptedValues.shardCount ?? partialConfig.shardCount,
     replicaSetMembers: promptedValues.replicaSetMembers ?? partialConfig.replicaSetMembers,
+    primaryElectionBehavior: promptedValues.primaryElectionBehavior ?? partialConfig.primaryElectionBehavior,
     mongodbVersion: promptedValues.mongodbVersion ?? partialConfig.mongodbVersion,
     mongosPort: promptedValues.mongosPort ?? partialConfig.mongosPort,
     storagePath: partialConfig.storagePath,
