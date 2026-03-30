@@ -31,12 +31,22 @@ const STATE_FILE_NAME = ".mongodb-cli-lab-state.json";
 const GLOBAL_STATE_DIR = path.join(os.homedir(), ".mongodb-cli-lab");
 let dockerComposeCommand = null;
 const DOCS = {
-  sharding: "https://www.mongodb.com/docs/manual/sharding/",
-  replication: "https://www.mongodb.com/docs/manual/replication/",
-  shardKey: "https://www.mongodb.com/docs/manual/core/sharding-shard-key/",
-  hashedSharding: "https://www.mongodb.com/docs/manual/core/hashed-sharding/",
-  configServers: "https://www.mongodb.com/docs/manual/core/sharded-cluster-config-servers/",
-  mongos: "https://www.mongodb.com/docs/manual/core/sharded-cluster-query-router/"
+  sharding: "https://www.mongodb.com/docs/manual/sharding/?utm_campaign=devrel&utm_source=third-part-content&utm_medium=cta&utm_content=mongodb-cli-lab&utm_term=ricardo.mello",
+  replication: "https://www.mongodb.com/docs/manual/replication/?utm_campaign=devrel&utm_source=third-part-content&utm_medium=cta&utm_content=mongodb-cli-lab&utm_term=ricardo.mello",
+  shardCollection: "https://www.mongodb.com/docs/manual/core/sharding-shard-a-collection/?utm_campaign=devrel&utm_source=third-part-content&utm_medium=cta&utm_content=mongodb-cli-lab&utm_term=ricardo.mello",
+  shardKey: "https://www.mongodb.com/docs/manual/core/sharding-shard-key/?utm_campaign=devrel&utm_source=third-part-content&utm_medium=cta&utm_content=mongodb-cli-lab&utm_term=ricardo.mello",
+  shardingBeforeYouShard: "https://medium.com/@MongoDB/mongodb-sharding-what-to-know-before-you-shard-4b1ba5e08cf1?utm_campaign=devrel&utm_source=third-part-content&utm_medium=cta&utm_content=mongodb-cli-lab&utm_term=ricardo.mello",
+  shardingBalancerAdministration: "https://www.mongodb.com/docs/manual/core/sharding-balancer-administration/?utm_campaign=devrel&utm_source=third-part-content&utm_medium=cta&utm_content=mongodb-cli-lab&utm_term=ricardo.mello",
+  hashedSharding: "https://www.mongodb.com/docs/manual/core/hashed-sharding/?utm_campaign=devrel&utm_source=third-part-content&utm_medium=cta&utm_content=mongodb-cli-lab&utm_term=ricardo.mello",
+  configServers: "https://www.mongodb.com/docs/manual/core/sharded-cluster-config-servers/?utm_campaign=devrel&utm_source=third-part-content&utm_medium=cta&utm_content=mongodb-cli-lab&utm_term=ricardo.mello",
+  mongos: "https://www.mongodb.com/docs/manual/core/sharded-cluster-query-router/?utm_campaign=devrel&utm_source=third-part-content&utm_medium=cta&utm_content=mongodb-cli-lab&utm_term=ricardo.mello",
+  deployStandalone: "https://www.mongodb.com/docs/ops-manager/current/tutorial/deploy-standalone/?utm_campaign=devrel&utm_source=third-part-content&utm_medium=cta&utm_content=mongodb-cli-lab&utm_term=ricardo.mello",
+  deployReplicaSet: "https://www.mongodb.com/docs/ops-manager/current/tutorial/deploy-replica-set/?utm_campaign=devrel&utm_source=third-part-content&utm_medium=cta&utm_content=mongodb-cli-lab&utm_term=ricardo.mello",
+  deployShardedCluster: "https://www.mongodb.com/docs/manual/tutorial/deploy-shard-cluster/?utm_campaign=devrel&utm_source=third-part-content&utm_medium=cta&utm_content=mongodb-cli-lab&utm_term=ricardo.mello",
+  atlasSearchManageIndexes: "https://www.mongodb.com/docs/atlas/atlas-search/manage-indexes/?utm_campaign=devrel&utm_source=third-part-content&utm_medium=cta&utm_content=mongodb-cli-lab&utm_term=ricardo.mello",
+  atlasSearchProduct: "https://www.mongodb.com/products/platform/atlas-search?utm_campaign=devrel&utm_source=third-part-content&utm_medium=cta&utm_content=mongodb-cli-lab&utm_term=ricardo.mello",
+  atlasSearchTutorial: "https://www.mongodb.com/docs/atlas/atlas-search/tutorial/?utm_campaign=devrel&utm_source=third-part-content&utm_medium=cta&utm_content=mongodb-cli-lab&utm_term=ricardo.mello",
+  atlasSearchPlayground: "https://search-playground.mongodb.com/tools/code-sandbox/snapshots/new?utm_campaign=devrel&utm_source=third-part-content&utm_medium=cta&utm_content=mongodb-cli-lab&utm_term=ricardo.mello"
 };
 const BOOK_DEMO_DOCUMENTS = Object.freeze([
   { title: "Clean Code", author: "Robert C. Martin", year: 2008, genre: "software", pages: 464, isbn: "9780132350884" },
@@ -56,7 +66,31 @@ function sleep(milliseconds) {
 }
 
 function printDocsLink(label, url) {
-  console.log(`Docs: ${label} -> ${url}`);
+  console.log(`Docs: \x1b[1m${label}\x1b[0m -> ${url}`);
+}
+
+function printSearchResources() {
+  console.log("Search resources\n");
+  console.log(`- \x1b[1mManage MongoDB Search indexes\x1b[0m: ${DOCS.atlasSearchManageIndexes}`);
+  console.log(`- \x1b[1mMongoDB Search overview\x1b[0m: ${DOCS.atlasSearchProduct}`);
+  console.log(`- \x1b[1mMongoDB Search tutorial\x1b[0m: ${DOCS.atlasSearchTutorial}`);
+  console.log(`- \x1b[1mSearch Playground\x1b[0m: ${DOCS.atlasSearchPlayground}\n`);
+}
+
+function printClusterSetupResources() {
+  console.log("Cluster setup resources\n");
+  console.log(`- \x1b[1mDeploy standalone\x1b[0m: ${DOCS.deployStandalone}`);
+  console.log(`- \x1b[1mDeploy replica set\x1b[0m: ${DOCS.deployReplicaSet}`);
+  console.log(`- \x1b[1mDeploy sharded cluster\x1b[0m: ${DOCS.deployShardedCluster}\n`);
+}
+
+function printShardingResources() {
+  console.log("Sharding resources\n");
+  console.log(`- \x1b[1mSharding overview\x1b[0m: ${DOCS.sharding}`);
+  console.log(`- \x1b[1mShard a collection\x1b[0m: ${DOCS.shardCollection}`);
+  console.log(`- \x1b[1mShard keys\x1b[0m: ${DOCS.shardKey}`);
+  console.log(`- \x1b[1mBalancer administration\x1b[0m: ${DOCS.shardingBalancerAdministration}`);
+  console.log(`- \x1b[1mBefore you shard\x1b[0m: ${DOCS.shardingBeforeYouShard}\n`);
 }
 
 function buildTopology(config) {
@@ -2341,9 +2375,6 @@ function printClusterDataSummary(overview) {
 
 function printBooksDemoIntroduction() {
   console.log("\nGuided demo: library.books\n");
-  printDocsLink("Shard keys", DOCS.shardKey);
-  printDocsLink("Hashed sharding", DOCS.hashedSharding);
-  console.log();
   console.log("Sample document:");
   console.log(
     JSON.stringify(
@@ -2557,6 +2588,18 @@ const result = {
 };
 `.trim()
   );
+}
+
+function printSearchIntroduction() {
+  console.log("\nSearch lab\n");
+  console.log("Helpful references before using Search:\n");
+  printSearchResources();
+}
+
+function printClusterSetupIntroduction() {
+  console.log("\nSet up cluster\n");
+  console.log("Helpful references before choosing a topology:\n");
+  printClusterSetupResources();
 }
 
 function printInsertPlan(label, insertCount) {
@@ -3272,10 +3315,6 @@ async function runCustomCollectionFlow(state, overview, mode = "custom") {
     return;
   }
 
-  printDocsLink("Shard keys", DOCS.shardKey);
-  printDocsLink("Hashed sharding", DOCS.hashedSharding);
-  console.log();
-
   let currentDocumentCount = 0;
   let resetCollection = false;
   let shardKeyCandidates = [];
@@ -3532,6 +3571,10 @@ async function interactiveShardingMenu() {
 
   let exitMenu = false;
   while (!exitMenu) {
+    console.log("\nWork with data and sharding\n");
+    console.log("Helpful references before working with sharded collections:\n");
+    printShardingResources();
+
     const overview = getClusterOverview(state);
     const { action } = await inquirer.prompt([
       {
@@ -3983,6 +4026,8 @@ async function runSearchQuickstart(options = {}) {
   console.log("  }");
   console.log("])\n");
   console.log(`Connect with: mongosh "${state.config.topology === "replica-set" ? getDirectConnectionString(state) : getPrimaryConnectionString(state)}"\n`);
+  console.log("If you want to explore MongoDB Search further:\n");
+  printSearchResources();
 }
 
 async function runDown() {
@@ -4155,6 +4200,8 @@ async function interactiveSearchMenu() {
   let exitMenu = false;
 
   while (!exitMenu) {
+    printSearchIntroduction();
+
     const { action } = await inquirer.prompt([
       {
         type: "list",
@@ -4296,6 +4343,9 @@ async function interactiveMainMenu() {
     ]);
 
     if (action === "up") {
+      if (!savedState) {
+        printClusterSetupIntroduction();
+      }
       await runUp();
       continue;
     }
