@@ -10,6 +10,7 @@ This project publishes to npm automatically through GitHub Actions when a new Gi
 npm version patch --no-git-tag-version
 ```
 
+
 2. Commit the version change:
 
 ```bash
