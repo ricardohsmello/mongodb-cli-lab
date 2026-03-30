@@ -8,6 +8,9 @@ import {
   runClean,
   runDown,
   runQuickstart,
+  runQueryableEncryptionQuickstart,
+  runQueryableEncryptionSetup,
+  runQueryableEncryptionStatus,
   runSearchImportDatabases,
   runSearchQuickstart,
   runStatus,
@@ -103,6 +106,7 @@ Examples:
   mongodb-cli-lab search up
   mongodb-cli-lab search import --databases sample_airbnb,sample_mflix
   mongodb-cli-lab search quickstart
+  mongodb-cli-lab qe quickstart
   mongodb-cli-lab status
   mongodb-cli-lab down
   mongodb-cli-lab clean
@@ -147,6 +151,10 @@ program
 const searchProgram = program
   .command("search")
   .description("Use MongoDB Search on the current cluster");
+
+const qeProgram = program
+  .command("qe")
+  .description("Use Queryable Encryption on a compatible replica-set cluster");
 
 addSearchUpOptions(
   searchProgram
@@ -196,6 +204,21 @@ Search restrictions:
 `
     )
 ).action((options) => handleAction(() => runSearchQuickstart(options)));
+
+qeProgram
+  .command("quickstart")
+  .description("Run the Queryable Encryption quickstart demo, creating a compatible replica-set if needed")
+  .action(() => handleAction(() => runQueryableEncryptionQuickstart()));
+
+qeProgram
+  .command("setup")
+  .description("Create a custom Queryable Encryption demo collection on the current cluster")
+  .action(() => handleAction(() => runQueryableEncryptionSetup()));
+
+qeProgram
+  .command("status")
+  .description("Show Queryable Encryption lab status")
+  .action(() => handleAction(() => runQueryableEncryptionStatus()));
 
 addUpOptions(
   program
