@@ -256,6 +256,13 @@ export default function Page() {
         </div>
       </nav>
 
+      {/* ── Disclaimer Banner ───────────────────────────────────────────── */}
+      <div className="bg-[#1a1200] border-b border-[#3a2a00] px-6 py-2.5 text-center">
+        <p className="text-yellow-300/80 text-xs">
+          ⚠️ <strong className="text-yellow-200">Independent community project</strong> — not an official MongoDB product. For local development, demos, and learning only. Do not use in production.
+        </p>
+      </div>
+
       {/* ── Hero ────────────────────────────────────────────────────────── */}
       <section className="relative overflow-hidden py-24 px-6">
         {/* Background decoration */}
@@ -280,7 +287,7 @@ export default function Page() {
               </h1>
 
               <p className="text-gray-400 text-lg leading-relaxed mb-8 max-w-xl mx-auto lg:mx-0">
-                A Node.js CLI to spin up local MongoDB environments with Docker — standalone, replica set, sharded cluster, Atlas Search, and Queryable Encryption. No Atlas account needed.
+                A Node.js CLI to spin up local MongoDB environments with Docker — designed for <strong className="text-white">learning, demos, and development</strong>. Standalone, replica set, sharded cluster, Atlas Search, and Queryable Encryption. No Atlas account needed.
               </p>
 
               <div className="flex flex-col sm:flex-row gap-3 justify-center lg:justify-start mb-10">
@@ -327,10 +334,11 @@ export default function Page() {
                   { type: "cmd", text: "mongodb-cli-lab" },
                   { type: "out", text: "" },
                   { type: "out", text: "? What would you like to do?" },
-                  { type: "out", text: "  ❯ 🚀  Set up a cluster" },
-                  { type: "out", text: "    🔍  Open Search lab" },
-                  { type: "out", text: "    🔐  Open Queryable Encryption lab" },
-                  { type: "out", text: "    📊  Work with data" },
+                  { type: "out", text: "    🚀  1. Set up cluster" },
+                  { type: "out", text: "    🔧  2. Manage cluster" },
+                  { type: "out", text: "    🔍  3. MongoDB Search lab" },
+                  { type: "out", text: "    🔐  4. Queryable Encryption lab" },
+                  { type: "out", text: "    🗂️  5. Sharding lab" },
                 ]}
               />
             </div>
@@ -344,7 +352,7 @@ export default function Page() {
           <div className="text-center mb-14">
             <h2 className="text-3xl font-black mb-3">Everything you need to learn MongoDB</h2>
             <p className="text-gray-400 max-w-xl mx-auto">
-              From a simple single node to a production-like sharded cluster — spin up any topology with one command.
+              From a simple single node to a full sharded cluster — spin up any topology with one command, built for learning and local development.
             </p>
           </div>
 
@@ -531,11 +539,11 @@ export default function Page() {
               </h3>
               <ul className="space-y-3 text-gray-400 text-sm">
                 {[
-                  "No Atlas account — everything runs locally via Docker",
-                  "Learn MongoDB topologies hands-on without cloud costs",
-                  "Demo Atlas Search features in a local environment",
-                  "Experiment with Queryable Encryption with zero setup",
-                  "Perfect for workshops, interviews, and local development",
+                  "100% local — everything runs on your machine via Docker",
+                  "Learn MongoDB topologies hands-on through real experimentation",
+                  "Explore Search and Queryable Encryption in a safe local sandbox",
+                  "Spin up and tear down labs instantly, with zero side effects",
+                  "Great for workshops, study sessions, and hands-on learning",
                 ].map((item) => (
                   <li key={item} className="flex items-start gap-2">
                     <span className="text-[#00ED64] mt-0.5 flex-shrink-0">
