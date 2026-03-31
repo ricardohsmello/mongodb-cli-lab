@@ -185,20 +185,6 @@ const EXAMPLES = {
       { type: "out" as const, text: "✓ Cluster ready! mongos: mongodb://localhost:28000" },
     ],
   },
-  encryption: {
-    label: "Queryable Encryption",
-    icon: "🔐",
-    lines: [
-      { type: "comment" as const, text: "Queryable Encryption on replica-set" },
-      { type: "cmd" as const, text: "mongodb-cli-lab up --topology replica-set --replicas 3 --mongodb-version 8.2 --port 28000" },
-      { type: "out" as const, text: "✓ Replica set started" },
-      { type: "comment" as const, text: "Then run the QE quickstart" },
-      { type: "cmd" as const, text: "mongodb-cli-lab qe quickstart" },
-      { type: "out" as const, text: "✓ Master key generated" },
-      { type: "out" as const, text: "✓ Data keys created" },
-      { type: "out" as const, text: "✓ Encrypted collection ready — fields are encrypted client-side and remain queryable" },
-    ],
-  },
 };
 
 
@@ -220,6 +206,7 @@ const COMMANDS = [
 
 export default function Page() {
   const [activeTab, setActiveTab] = useState<keyof typeof EXAMPLES>("standalone");
+
 
   return (
     <div className="min-h-screen bg-[#001E2B] text-white">
@@ -468,6 +455,67 @@ export default function Page() {
           </div>
 
           <TerminalBlock title={EXAMPLES[activeTab].label} lines={EXAMPLES[activeTab].lines} />
+        </div>
+      </section>
+
+      {/* ── Labs ────────────────────────────────────────────────────────── */}
+      <section className="py-20 px-6 border-t border-[#1A3A4A]">
+        <div className="max-w-4xl mx-auto">
+          <div className="text-center mb-10">
+            <h2 className="text-3xl font-black mb-3">Feature labs</h2>
+            <p className="text-gray-400">Go deeper with dedicated labs for MongoDB&apos;s most powerful features.</p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {/* Search Lab */}
+            <div className="card-hover bg-[#0C2233] border border-[#1A3A4A] rounded-2xl p-6 flex flex-col gap-4">
+              <div className="flex items-center gap-3">
+                <span className="text-3xl">🔍</span>
+                <div>
+                  <h3 className="text-white font-bold text-lg">MongoDB Search Lab</h3>
+                  <span className="mono text-xs text-[#00ED64] border border-[#00ED64]/30 px-2 py-0.5 rounded-full">Atlas Search</span>
+                </div>
+              </div>
+              <p className="text-gray-400 text-sm leading-relaxed">
+                Experiment with full-text search locally. The quickstart spins up a replica set with mongot, loads sample data, and runs search queries — ready to explore in minutes.
+              </p>
+              <TerminalBlock
+                title="Search quickstart"
+                lines={[
+                  { type: "cmd", text: "mongodb-cli-lab quickstart --topology replica-set --replicas 3 --search --mongodb-version 8.2 --port 28000" },
+                  { type: "out", text: "✓ Replica set started" },
+                  { type: "out", text: "✓ mongot (Search engine) enabled" },
+                  { type: "out", text: "✓ Sample data loaded" },
+                  { type: "out", text: "✓ Search indexes created — ready to query!" },
+                ]}
+              />
+            </div>
+
+            {/* QE Lab */}
+            <div className="card-hover bg-[#0C2233] border border-[#1A3A4A] rounded-2xl p-6 flex flex-col gap-4">
+              <div className="flex items-center gap-3">
+                <span className="text-3xl">🔐</span>
+                <div>
+                  <h3 className="text-white font-bold text-lg">Queryable Encryption Lab</h3>
+                  <span className="mono text-xs text-[#00ED64] border border-[#00ED64]/30 px-2 py-0.5 rounded-full">QE Lab</span>
+                </div>
+              </div>
+              <p className="text-gray-400 text-sm leading-relaxed">
+                Learn how Queryable Encryption works in practice. The quickstart generates keys, creates an encrypted collection, and demonstrates querying encrypted fields — all locally.
+              </p>
+              <TerminalBlock
+                title="QE quickstart"
+                lines={[
+                  { type: "comment", text: "Start a replica set first, then:" },
+                  { type: "cmd", text: "mongodb-cli-lab qe quickstart" },
+                  { type: "out", text: "✓ Master key generated" },
+                  { type: "out", text: "✓ Data keys created" },
+                  { type: "out", text: "✓ Encrypted collection ready" },
+                  { type: "out", text: "✓ Fields encrypted at rest and still queryable!" },
+                ]}
+              />
+            </div>
+          </div>
         </div>
       </section>
 
