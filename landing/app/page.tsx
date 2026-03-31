@@ -1,6 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
+import gsap from "gsap";
+import { ScrollTrigger } from "gsap/ScrollTrigger";
 
 // ─── Icons (inline SVG components) ──────────────────────────────────────────
 
@@ -128,7 +130,7 @@ function TerminalBlock({ lines, title = "Terminal" }: { lines: { type: "cmd" | "
 
 function FeatureCard({ icon, title, description, badge }: { icon: string; title: string; description: string; badge?: string }) {
   return (
-    <div className="card-hover bg-[#0C2233] border border-[#1A3A4A] rounded-2xl p-6 flex flex-col gap-3">
+    <div className="feature-card card-hover bg-[#0C2233] border border-[#1A3A4A] rounded-2xl p-6 flex flex-col gap-3">
       <div className="flex items-center justify-between">
         <span className="text-3xl">{icon}</span>
         {badge && (
@@ -139,6 +141,109 @@ function FeatureCard({ icon, title, description, badge }: { icon: string; title:
       </div>
       <h3 className="text-white font-semibold text-lg">{title}</h3>
       <p className="text-gray-400 text-sm leading-relaxed">{description}</p>
+    </div>
+  );
+}
+
+// ─── Hero Terminal (typing animation) ────────────────────────────────────────
+
+const HERO_SEQUENCE = [
+  { kind: "cmd"   as const, text: "npm install -g @ricardohsmello/mongodb-cli-lab", speed: 32 },
+  { kind: "pause" as const, ms: 700 },
+  { kind: "out"   as const, text: "added 112 packages in 7s" },
+  { kind: "pause" as const, ms: 400 },
+  { kind: "cmd"   as const, text: "mongodb-cli-lab", speed: 90 },
+  { kind: "pause" as const, ms: 550 },
+  { kind: "out"   as const, text: "" },
+  { kind: "out"   as const, text: "What would you like to do?" },
+  { kind: "pause" as const, ms: 180 },
+  { kind: "out"   as const, text: "    🚀  1. Set up cluster" },
+  { kind: "pause" as const, ms: 110 },
+  { kind: "out"   as const, text: "    🔧  2. Manage cluster" },
+  { kind: "pause" as const, ms: 110 },
+  { kind: "out"   as const, text: "    🔍  3. MongoDB Search lab" },
+  { kind: "pause" as const, ms: 110 },
+  { kind: "out"   as const, text: "    🔐  4. Queryable Encryption lab" },
+  { kind: "pause" as const, ms: 110 },
+  { kind: "out"   as const, text: "    🗂️  5. Sharding lab" },
+];
+
+type HeroLine = { type: "cmd" | "out"; text: string };
+
+function HeroTerminal() {
+  const [lines, setLines]   = useState<HeroLine[]>([]);
+  const [typing, setTyping] = useState<string | null>(null);
+  const mountedRef          = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    const tids: ReturnType<typeof setTimeout>[] = [];
+
+    const wait = (ms: number) =>
+      new Promise<void>((res) => { tids.push(setTimeout(res, ms)); });
+
+    async function run() {
+      await wait(800);
+      for (const step of HERO_SEQUENCE) {
+        if (!mountedRef.current) break;
+        if (step.kind === "pause") {
+          await wait(step.ms);
+        } else if (step.kind === "out") {
+          setLines((prev) => [...prev, { type: "out", text: step.text }]);
+          await wait(40);
+        } else if (step.kind === "cmd") {
+          setTyping("");
+          for (let i = 1; i <= step.text.length; i++) {
+            if (!mountedRef.current) break;
+            setTyping(step.text.slice(0, i));
+            await wait(step.speed);
+          }
+          setLines((prev) => [...prev, { type: "cmd", text: step.text }]);
+          setTyping(null);
+        }
+      }
+    }
+
+    run();
+    return () => {
+      mountedRef.current = false;
+      tids.forEach(clearTimeout);
+    };
+  }, []);
+
+  return (
+    <div className="code-block overflow-hidden">
+      <div className="flex items-center gap-2 px-4 py-3 border-b border-[#1A3A4A] bg-[#061220]">
+        <div className="flex gap-1.5">
+          <div className="w-3 h-3 rounded-full bg-[#FF5F57]" />
+          <div className="w-3 h-3 rounded-full bg-[#FFBD2E]" />
+          <div className="w-3 h-3 rounded-full bg-[#28CA41]" />
+        </div>
+        <span className="mono text-xs text-gray-500 ml-2">Terminal</span>
+      </div>
+      <div className="p-5 space-y-1 min-h-[300px]">
+        {lines.map((line, i) => (
+          <div key={i} className="mono text-sm leading-relaxed">
+            {line.type === "cmd" ? (
+              <span>
+                <span className="text-[#00ED64]">$ </span>
+                <span className="text-white">{line.text}</span>
+              </span>
+            ) : line.text === "" ? (
+              <span>&nbsp;</span>
+            ) : (
+              <span className="text-gray-400 pl-4">{line.text}</span>
+            )}
+          </div>
+        ))}
+        {typing !== null && (
+          <div className="mono text-sm leading-relaxed">
+            <span className="text-[#00ED64]">$ </span>
+            <span className="text-white">{typing}</span>
+            <span className="animate-blink text-[#00ED64]">█</span>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -206,7 +311,148 @@ const COMMANDS = [
 
 export default function Page() {
   const [activeTab, setActiveTab] = useState<keyof typeof EXAMPLES>("standalone");
+  const [npmDownloads, setNpmDownloads] = useState<string>("...");
+  const [githubStars, setGithubStars]   = useState<string>("...");
 
+  useEffect(() => {
+    fetch("https://api.npmjs.org/downloads/point/2000-01-01:2099-12-31/@ricardohsmello%2Fmongodb-cli-lab")
+      .then((r) => r.json())
+      .then((data) => {
+        const n: number = data.downloads ?? 0;
+        setNpmDownloads(n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
+      })
+      .catch(() => setNpmDownloads("—"));
+
+    fetch("https://api.github.com/repos/ricardohsmello/mongodb-cli-lab")
+      .then((r) => r.json())
+      .then((data) => {
+        const s: number = data.stargazers_count ?? 0;
+        setGithubStars(s >= 1000 ? `${(s / 1000).toFixed(1)}k` : String(s));
+      })
+      .catch(() => setGithubStars("—"));
+  }, []);
+
+  const heroTextRef = useRef<HTMLDivElement>(null);
+  const heroTerminalRef = useRef<HTMLDivElement>(null);
+  const featuresRef = useRef<HTMLDivElement>(null);
+  const installRef = useRef<HTMLDivElement>(null);
+  const topologyRef = useRef<HTMLDivElement>(null);
+  const labsRef = useRef<HTMLDivElement>(null);
+  const commandsRef = useRef<HTMLDivElement>(null);
+  const whyRef = useRef<HTMLDivElement>(null);
+  const ctaRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    gsap.registerPlugin(ScrollTrigger);
+
+    // Helper: animate only if target(s) exist
+    const fromTo = (
+      target: Element | NodeList | Element[] | null | undefined,
+      vars: gsap.TweenVars & { scrollTrigger?: ScrollTrigger.Vars }
+    ) => {
+      if (!target) return;
+      const els = target instanceof NodeList ? Array.from(target) : target;
+      if (Array.isArray(els) && els.length === 0) return;
+      const st = vars.scrollTrigger;
+      gsap.fromTo(
+        els,
+        { opacity: 0, y: vars.y ?? 0, x: vars.x ?? 0, scale: vars.scale ?? 1 },
+        {
+          opacity: 1, y: 0, x: 0, scale: 1,
+          duration: vars.duration ?? 0.6,
+          stagger: vars.stagger,
+          ease: vars.ease ?? "power2.out",
+          delay: vars.delay,
+          clearProps: "transform,opacity",
+          scrollTrigger: st
+            ? Object.assign({ once: true }, st)
+            : undefined,
+        }
+      );
+    };
+
+    const ctx = gsap.context(() => {
+      // Hero text — stagger children
+      if (heroTextRef.current) {
+        fromTo(Array.from(heroTextRef.current.children) as Element[], {
+          y: 40, duration: 0.8, stagger: 0.12, ease: "power3.out", delay: 0.15,
+        });
+      }
+
+      // Hero terminal — slide from right
+      if (heroTerminalRef.current) {
+        fromTo(heroTerminalRef.current, {
+          x: 60, duration: 0.9, ease: "power3.out", delay: 0.45,
+        });
+      }
+
+      // Features
+      if (featuresRef.current) {
+        fromTo(featuresRef.current.querySelector(".section-header"), {
+          y: 30, scrollTrigger: { trigger: featuresRef.current, start: "top 88%" },
+        });
+        fromTo(featuresRef.current.querySelectorAll(".feature-card"), {
+          y: 50, stagger: 0.09, scrollTrigger: { trigger: featuresRef.current, start: "top 82%" },
+        });
+      }
+
+      // Install
+      if (installRef.current) {
+        fromTo(installRef.current.querySelector(".section-header"), {
+          y: 30, scrollTrigger: { trigger: installRef.current, start: "top 88%" },
+        });
+        fromTo(installRef.current.querySelectorAll(".install-step"), {
+          x: -40, stagger: 0.18, scrollTrigger: { trigger: installRef.current, start: "top 82%" },
+        });
+      }
+
+      // Topology
+      if (topologyRef.current) {
+        fromTo(topologyRef.current.querySelector(".section-header"), {
+          y: 30, scrollTrigger: { trigger: topologyRef.current, start: "top 88%" },
+        });
+        fromTo(topologyRef.current.querySelector(".topology-tabs"), {
+          y: 20, scrollTrigger: { trigger: topologyRef.current, start: "top 82%" },
+        });
+        fromTo(topologyRef.current.querySelector(".topology-terminal"), {
+          y: 30, scrollTrigger: { trigger: topologyRef.current, start: "top 78%" },
+        });
+      }
+
+      // Labs
+      if (labsRef.current) {
+        fromTo(labsRef.current.querySelector(".section-header"), {
+          y: 30, scrollTrigger: { trigger: labsRef.current, start: "top 88%" },
+        });
+        fromTo(labsRef.current.querySelectorAll(".lab-card"), {
+          y: 50, stagger: 0.2, scrollTrigger: { trigger: labsRef.current, start: "top 82%" },
+        });
+      }
+
+      // Commands
+      if (commandsRef.current) {
+        fromTo(commandsRef.current, {
+          y: 40, scrollTrigger: { trigger: commandsRef.current, start: "top 82%" },
+        });
+      }
+
+      // Why cards
+      if (whyRef.current) {
+        fromTo(whyRef.current.querySelectorAll(".why-card"), {
+          y: 40, stagger: 0.18, scrollTrigger: { trigger: whyRef.current, start: "top 82%" },
+        });
+      }
+
+      // CTA
+      if (ctaRef.current) {
+        fromTo(ctaRef.current, {
+          scale: 0.96, scrollTrigger: { trigger: ctaRef.current, start: "top 85%" },
+        });
+      }
+    });
+
+    return () => ctx.revert();
+  }, []);
 
   return (
     <div className="min-h-screen bg-[#001E2B] text-white">
@@ -263,7 +509,7 @@ export default function Page() {
         <div className="max-w-6xl mx-auto relative">
           <div className="flex flex-col lg:flex-row items-center gap-16">
             {/* Left: text */}
-            <div className="flex-1 text-center lg:text-left">
+            <div ref={heroTextRef} className="flex-1 text-center lg:text-left">
               <div className="inline-flex items-center gap-2 bg-[#00ED64]/10 border border-[#00ED64]/20 rounded-full px-4 py-2 mb-6">
                 <IconDocker />
                 <span className="mono text-xs text-[#00ED64]">Docker-powered local labs</span>
@@ -298,9 +544,9 @@ export default function Page() {
               {/* Stats */}
               <div className="flex gap-6 justify-center lg:justify-start">
                 {[
-                  { label: "npm installs", value: "free" },
-                  { label: "topologies", value: "3" },
-                  { label: "Docker required", value: "only dep" },
+                  { label: "total downloads", value: npmDownloads },
+                  { label: "GitHub stars", value: githubStars },
+                  { label: "labs available", value: "3" },
                 ].map((s) => (
                   <div key={s.label} className="text-center">
                     <div className="text-[#00ED64] font-bold text-xl">{s.value}</div>
@@ -310,25 +556,9 @@ export default function Page() {
               </div>
             </div>
 
-            {/* Right: quick install terminal */}
-            <div className="flex-1 w-full max-w-lg">
-              <TerminalBlock
-                title="Quick Install"
-                lines={[
-                  { type: "comment", text: "Install globally" },
-                  { type: "cmd", text: "npm install -g @ricardohsmello/mongodb-cli-lab" },
-                  { type: "out", text: "" },
-                  { type: "comment", text: "Launch the interactive menu" },
-                  { type: "cmd", text: "mongodb-cli-lab" },
-                  { type: "out", text: "" },
-                  { type: "out", text: "? What would you like to do?" },
-                  { type: "out", text: "    🚀  1. Set up cluster" },
-                  { type: "out", text: "    🔧  2. Manage cluster" },
-                  { type: "out", text: "    🔍  3. MongoDB Search lab" },
-                  { type: "out", text: "    🔐  4. Queryable Encryption lab" },
-                  { type: "out", text: "    🗂️  5. Sharding lab" },
-                ]}
-              />
+            {/* Right: animated terminal */}
+            <div ref={heroTerminalRef} className="flex-1 w-full max-w-lg">
+              <HeroTerminal />
             </div>
           </div>
         </div>
@@ -336,8 +566,8 @@ export default function Page() {
 
       {/* ── Features ────────────────────────────────────────────────────── */}
       <section className="py-20 px-6 border-t border-[#1A3A4A]">
-        <div className="max-w-6xl mx-auto">
-          <div className="text-center mb-14">
+        <div ref={featuresRef} className="max-w-6xl mx-auto">
+          <div className="section-header text-center mb-14">
             <h2 className="text-3xl font-black mb-3">Everything you need to learn MongoDB</h2>
             <p className="text-gray-400 max-w-xl mx-auto">
               From a simple single node to a full sharded cluster — spin up any topology with one command, built for learning and local development.
@@ -384,12 +614,14 @@ export default function Page() {
 
       {/* ── Install ─────────────────────────────────────────────────────── */}
       <section id="install" className="py-20 px-6 border-t border-[#1A3A4A]">
-        <div className="max-w-3xl mx-auto text-center">
-          <h2 className="text-3xl font-black mb-3">Get started in 2 steps</h2>
-          <p className="text-gray-400 mb-10">Only prerequisite: Docker running on your machine.</p>
+        <div ref={installRef} className="max-w-3xl mx-auto text-center">
+          <div className="section-header">
+            <h2 className="text-3xl font-black mb-3">Get started in 2 steps</h2>
+            <p className="text-gray-400 mb-10">Only prerequisite: Docker running on your machine.</p>
+          </div>
 
           <div className="space-y-4 text-left">
-            <div className="flex gap-4 items-start">
+            <div className="install-step flex gap-4 items-start">
               <div className="w-8 h-8 rounded-full bg-[#00ED64] text-[#001E2B] font-black flex items-center justify-center flex-shrink-0 mt-1">
                 1
               </div>
@@ -402,7 +634,7 @@ export default function Page() {
               </div>
             </div>
 
-            <div className="flex gap-4 items-start">
+            <div className="install-step flex gap-4 items-start">
               <div className="w-8 h-8 rounded-full bg-[#00ED64] text-[#001E2B] font-black flex items-center justify-center flex-shrink-0 mt-1">
                 2
               </div>
@@ -426,14 +658,14 @@ export default function Page() {
 
       {/* ── Examples / Tabs ─────────────────────────────────────────────── */}
       <section className="py-20 px-6 border-t border-[#1A3A4A]">
-        <div className="max-w-4xl mx-auto">
-          <div className="text-center mb-10">
+        <div ref={topologyRef} className="max-w-4xl mx-auto">
+          <div className="section-header text-center mb-10">
             <h2 className="text-3xl font-black mb-3">Pick your topology</h2>
             <p className="text-gray-400">Each one is one command away.</p>
           </div>
 
           {/* Tabs */}
-          <div className="flex flex-wrap gap-2 justify-center mb-6">
+          <div className="topology-tabs flex flex-wrap gap-2 justify-center mb-6">
             {(Object.keys(EXAMPLES) as (keyof typeof EXAMPLES)[]).map((key) => {
               const ex = EXAMPLES[key];
               const active = activeTab === key;
@@ -454,21 +686,23 @@ export default function Page() {
             })}
           </div>
 
-          <TerminalBlock title={EXAMPLES[activeTab].label} lines={EXAMPLES[activeTab].lines} />
+          <div className="topology-terminal">
+            <TerminalBlock title={EXAMPLES[activeTab].label} lines={EXAMPLES[activeTab].lines} />
+          </div>
         </div>
       </section>
 
       {/* ── Labs ────────────────────────────────────────────────────────── */}
       <section className="py-20 px-6 border-t border-[#1A3A4A]">
-        <div className="max-w-4xl mx-auto">
-          <div className="text-center mb-10">
+        <div ref={labsRef} className="max-w-4xl mx-auto">
+          <div className="section-header text-center mb-10">
             <h2 className="text-3xl font-black mb-3">Feature labs</h2>
             <p className="text-gray-400">Go deeper with dedicated labs for MongoDB&apos;s most powerful features.</p>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {/* Search Lab */}
-            <div className="card-hover bg-[#0C2233] border border-[#1A3A4A] rounded-2xl p-6 flex flex-col gap-4">
+            <div className="lab-card card-hover bg-[#0C2233] border border-[#1A3A4A] rounded-2xl p-6 flex flex-col gap-4">
               <div className="flex items-center gap-3">
                 <span className="text-3xl">🔍</span>
                 <div>
@@ -492,7 +726,7 @@ export default function Page() {
             </div>
 
             {/* QE Lab */}
-            <div className="card-hover bg-[#0C2233] border border-[#1A3A4A] rounded-2xl p-6 flex flex-col gap-4">
+            <div className="lab-card card-hover bg-[#0C2233] border border-[#1A3A4A] rounded-2xl p-6 flex flex-col gap-4">
               <div className="flex items-center gap-3">
                 <span className="text-3xl">🔐</span>
                 <div>
@@ -521,7 +755,7 @@ export default function Page() {
 
       {/* ── Commands Reference ───────────────────────────────────────────── */}
       <section className="py-20 px-6 border-t border-[#1A3A4A]">
-        <div className="max-w-4xl mx-auto">
+        <div ref={commandsRef} className="max-w-4xl mx-auto">
           <div className="text-center mb-10">
             <h2 className="text-3xl font-black mb-3">Command reference</h2>
             <p className="text-gray-400">All the commands at a glance.</p>
@@ -580,9 +814,9 @@ export default function Page() {
 
       {/* ── Why / Disclaimer ────────────────────────────────────────────── */}
       <section className="py-20 px-6 border-t border-[#1A3A4A]">
-        <div className="max-w-4xl mx-auto">
+        <div ref={whyRef} className="max-w-4xl mx-auto">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="bg-[#0C2233] border border-[#1A3A4A] rounded-2xl p-6">
+            <div className="why-card bg-[#0C2233] border border-[#1A3A4A] rounded-2xl p-6">
               <h3 className="text-white font-bold text-xl mb-4 flex items-center gap-2">
                 <span>💡</span> Why this tool?
               </h3>
@@ -604,7 +838,7 @@ export default function Page() {
               </ul>
             </div>
 
-            <div className="bg-[#1a1200] border border-[#3a2a00] rounded-2xl p-6">
+            <div className="why-card bg-[#1a1200] border border-[#3a2a00] rounded-2xl p-6">
               <h3 className="text-yellow-400 font-bold text-xl mb-4 flex items-center gap-2">
                 <span>⚠️</span> Disclaimer
               </h3>
@@ -622,7 +856,7 @@ export default function Page() {
       {/* ── CTA ─────────────────────────────────────────────────────────── */}
       <section className="py-24 px-6 border-t border-[#1A3A4A]">
         <div className="max-w-3xl mx-auto text-center">
-          <div className="glow-green bg-gradient-to-b from-[#0C2233] to-[#001E2B] border border-[#1A3A4A] rounded-3xl p-12">
+          <div ref={ctaRef} className="glow-green bg-gradient-to-b from-[#0C2233] to-[#001E2B] border border-[#1A3A4A] rounded-3xl p-12">
             <h2 className="text-4xl font-black mb-4">
               Ready to spin up a{" "}
               <span className="gradient-text">local cluster?</span>
