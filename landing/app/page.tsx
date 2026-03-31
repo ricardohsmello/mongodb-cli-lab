@@ -196,10 +196,11 @@ const EXAMPLES = {
       { type: "cmd" as const, text: "mongodb-cli-lab qe quickstart" },
       { type: "out" as const, text: "✓ Master key generated" },
       { type: "out" as const, text: "✓ Data keys created" },
-      { type: "out" as const, text: "✓ Encrypted collection ready — fields are encrypted at rest!" },
+      { type: "out" as const, text: "✓ Encrypted collection ready — fields are encrypted client-side and remain queryable" },
     ],
   },
 };
+
 
 // ─── Command Table ─────────────────────────────────────────────────────────────
 
