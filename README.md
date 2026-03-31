@@ -6,6 +6,8 @@
 
 > A Node.js CLI to spin up local MongoDB labs with Docker — standalone, replica set, sharded cluster, MongoDB Search, and Queryable Encryption labs.
 
+Website: [mongodb-cli-lab.vercel.app](https://mongodb-cli-lab.vercel.app/)
+
 **⚠️ Disclaimer**
 
 This is an independent project and is **not an official MongoDB product**. It is intended for local development, demos, testing, and learning purposes only.
