@@ -313,6 +313,7 @@ export default function Page() {
   const [activeTab, setActiveTab] = useState<keyof typeof EXAMPLES>("standalone");
   const [npmDownloads, setNpmDownloads] = useState<string>("...");
   const [githubStars, setGithubStars]   = useState<string>("...");
+  const [npmVersion, setNpmVersion]     = useState<string>("...");
 
   useEffect(() => {
     fetch("https://api.npmjs.org/downloads/point/2000-01-01:2099-12-31/@ricardohsmello%2Fmongodb-cli-lab")
@@ -330,6 +331,11 @@ export default function Page() {
         setGithubStars(s >= 1000 ? `${(s / 1000).toFixed(1)}k` : String(s));
       })
       .catch(() => setGithubStars("—"));
+
+    fetch("https://registry.npmjs.org/@ricardohsmello%2Fmongodb-cli-lab/latest")
+      .then((r) => r.json())
+      .then((data) => setNpmVersion(data.version ?? "—"))
+      .catch(() => setNpmVersion("—"));
   }, []);
 
   const heroTextRef = useRef<HTMLDivElement>(null);
@@ -465,7 +471,7 @@ export default function Page() {
               <span className="text-[#001E2B] font-black text-sm">M</span>
             </div>
             <span className="mono font-semibold text-white text-sm">mongodb-cli-lab</span>
-            <span className="mono text-xs text-[#00ED64] border border-[#00ED64]/30 px-2 py-0.5 rounded-full">v2.1.0</span>
+            <span className="mono text-xs text-[#00ED64] border border-[#00ED64]/30 px-2 py-0.5 rounded-full">v{npmVersion}</span>
           </div>
           <div className="flex items-center gap-3">
             <a
