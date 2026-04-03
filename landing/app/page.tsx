@@ -529,7 +529,7 @@ export default function Page() {
               </h1>
 
               <p className="text-gray-400 text-lg leading-relaxed mb-8 max-w-xl mx-auto lg:mx-0">
-                A Node.js CLI to spin up local MongoDB environments with Docker — designed for <strong className="text-white">learning, demos, and development</strong>. Standalone, replica set, sharded cluster, Atlas Search, and Queryable Encryption. No Atlas account needed.
+                A Node.js CLI to spin up local MongoDB environments with Docker — designed for <strong className="text-white">learning, demos, and development</strong>. Standalone, replica set, sharded cluster, MongoDB Search, and Queryable Encryption.
               </p>
 
               <div className="flex flex-col sm:flex-row gap-3 justify-center lg:justify-start mb-10">
@@ -602,8 +602,8 @@ export default function Page() {
             <FeatureCard
               icon="🔍"
               title="MongoDB Search"
-              description="Enable Atlas Search (mongot) on standalone or replica set topologies. Comes with sample data and a quickstart to run full-text queries."
-              badge="Atlas Search"
+              description="Enable MongoDB Search (mongot) on standalone or replica set topologies. Comes with sample data and a quickstart to run full-text queries."
+              badge="MongoDB Search"
             />
             <FeatureCard
               icon="🔐"
