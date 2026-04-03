@@ -108,9 +108,9 @@ function TerminalBlock({ lines, title = "Terminal" }: { lines: { type: "cmd" | "
         <span className="mono text-xs text-gray-500 ml-2">{title}</span>
         <CopyButton text={allText} />
       </div>
-      <div className="p-5 space-y-1">
+      <div className="p-5 space-y-1 overflow-x-auto">
         {lines.map((line, i) => (
-          <div key={i} className="mono text-sm leading-relaxed">
+          <div key={i} className="mono text-sm leading-relaxed whitespace-nowrap">
             {line.type === "cmd" && (
               <span>
                 <span className="text-[#00ED64]">$ </span>
@@ -150,7 +150,7 @@ function FeatureCard({ icon, title, description, badge }: { icon: string; title:
 const HERO_SEQUENCE = [
   { kind: "cmd"   as const, text: "npm install -g @ricardohsmello/mongodb-cli-lab", speed: 32 },
   { kind: "pause" as const, ms: 700 },
-  { kind: "out"   as const, text: "added 112 packages in 7s" },
+  { kind: "out"   as const, text: "added 90 packages in 5s" },
   { kind: "pause" as const, ms: 400 },
   { kind: "cmd"   as const, text: "mongodb-cli-lab", speed: 90 },
   { kind: "pause" as const, ms: 550 },
@@ -266,12 +266,14 @@ const EXAMPLES = {
     label: "Replica Set",
     icon: "🔁",
     lines: [
-      { type: "comment" as const, text: "3-node replica set with Search enabled" },
-      { type: "cmd" as const, text: "mongodb-cli-lab up --topology replica-set --replicas 3 --search --mongodb-version 8.2 --port 28000" },
+      { type: "comment" as const, text: "3-node replica set" },
+      { type: "cmd" as const, text: "mongodb-cli-lab up --topology replica-set --replicas 3 --mongodb-version 8.2 --port 28000" },
       { type: "out" as const, text: "✓ Starting 3-member replica set..." },
       { type: "out" as const, text: "✓ Electing primary node..." },
-      { type: "out" as const, text: "✓ MongoDB Search (mongot) enabled" },
-      { type: "out" as const, text: "✓ Lab ready! Primary: mongodb://localhost:28000" },
+      { type: "out" as const, text: "  ├─ node :28000  →  PRIMARY" },
+      { type: "out" as const, text: "  ├─ node :28001  →  SECONDARY" },
+      { type: "out" as const, text: "  └─ node :28002  →  SECONDARY" },
+      { type: "out" as const, text: "✓ Connection: mongodb://rs0-1.localhost:28000,rs0-2.localhost:28001,rs0-3.localhost:28002/?replicaSet=rs0" },
     ],
   },
   sharded: {
@@ -313,6 +315,7 @@ export default function Page() {
   const [activeTab, setActiveTab] = useState<keyof typeof EXAMPLES>("standalone");
   const [npmDownloads, setNpmDownloads] = useState<string>("...");
   const [githubStars, setGithubStars]   = useState<string>("...");
+  const [npmVersion, setNpmVersion]     = useState<string>("...");
 
   useEffect(() => {
     fetch("https://api.npmjs.org/downloads/point/2000-01-01:2099-12-31/@ricardohsmello%2Fmongodb-cli-lab")
@@ -330,6 +333,11 @@ export default function Page() {
         setGithubStars(s >= 1000 ? `${(s / 1000).toFixed(1)}k` : String(s));
       })
       .catch(() => setGithubStars("—"));
+
+    fetch("https://registry.npmjs.org/@ricardohsmello%2Fmongodb-cli-lab/latest")
+      .then((r) => r.json())
+      .then((data) => setNpmVersion(data.version ?? "—"))
+      .catch(() => setNpmVersion("—"));
   }, []);
 
   const heroTextRef = useRef<HTMLDivElement>(null);
@@ -465,7 +473,7 @@ export default function Page() {
               <span className="text-[#001E2B] font-black text-sm">M</span>
             </div>
             <span className="mono font-semibold text-white text-sm">mongodb-cli-lab</span>
-            <span className="mono text-xs text-[#00ED64] border border-[#00ED64]/30 px-2 py-0.5 rounded-full">v2.1.0</span>
+            <span className="mono text-xs text-[#00ED64] border border-[#00ED64]/30 px-2 py-0.5 rounded-full">v{npmVersion}</span>
           </div>
           <div className="flex items-center gap-3">
             <a
@@ -707,11 +715,14 @@ export default function Page() {
                 <span className="text-3xl">🔍</span>
                 <div>
                   <h3 className="text-white font-bold text-lg">MongoDB Search Lab</h3>
-                  <span className="mono text-xs text-[#00ED64] border border-[#00ED64]/30 px-2 py-0.5 rounded-full">Atlas Search</span>
+                  <div className="flex items-center gap-2 mt-1">
+                    <span className="mono text-xs text-[#00ED64] border border-[#00ED64]/30 px-2 py-0.5 rounded-full">Full-text Search</span>
+                    <span className="mono text-xs text-[#00A1FF] border border-[#00A1FF]/30 px-2 py-0.5 rounded-full">Vector Search</span>
+                  </div>
                 </div>
               </div>
               <p className="text-gray-400 text-sm leading-relaxed">
-                Experiment with full-text search locally. The quickstart spins up a replica set with mongot, loads sample data, and runs search queries — ready to explore in minutes.
+                Experiment with full-text and vector search locally. The quickstart spins up a replica set with mongot, loads sample data, and runs search queries — ready to explore in minutes.
               </p>
               <TerminalBlock
                 title="Search quickstart"
@@ -903,6 +914,14 @@ export default function Page() {
             <span>MIT License</span>
           </div>
           <div className="flex items-center gap-4">
+            <a
+              href="https://www.ricardohsmello.com"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="hover:text-white transition-colors"
+            >
+              Built by <span className="text-[#00ED64] hover:underline">Ricardo Mello</span>
+            </a>
             <a
               href="https://github.com/ricardohsmello/mongodb-cli-lab"
               target="_blank"
