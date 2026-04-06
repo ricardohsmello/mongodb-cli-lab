@@ -9,7 +9,17 @@
   "dependencies": {
     "commander": "^12.1.0",
     "inquirer": "^9.3.8",
-    "mongodb": "^7.1.1",
+    "mongodb": "^7.1.1"
+  },
+  "devDependencies": {
     "mongodb-client-encryption": "^7.0.0"
+  },
+  "peerDependencies": {
+    "mongodb-client-encryption": ">=7.0.0"
+  },
+  "peerDependenciesMeta": {
+    "mongodb-client-encryption": {
+      "optional": true
+    }
   }
 }
