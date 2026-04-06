@@ -2,8 +2,40 @@ import crypto from "node:crypto";
 import { existsSync } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { execSync } from "node:child_process";
 import inquirer from "inquirer";
 import { Binary, ClientEncryption, Double, Int32, MongoClient } from "mongodb";
+
+async function promptAndInstallEncryptionPackage() {
+  console.log("\nThe 'mongodb-client-encryption' package is required for Queryable Encryption but is not installed.");
+  const { install } = await inquirer.prompt([
+    {
+      type: "confirm",
+      name: "install",
+      message: "Do you want to install it now? (npm install -g mongodb-client-encryption)",
+      default: true
+    }
+  ]);
+
+  if (!install) {
+    throw new Error("Queryable Encryption requires 'mongodb-client-encryption'. Aborting.");
+  }
+
+  console.log("\nInstalling mongodb-client-encryption...");
+  try {
+    execSync("npm install -g mongodb-client-encryption", { stdio: "inherit" });
+    console.log("\nInstallation complete. Please run the command again to continue.");
+  } catch {
+    console.log("\nInstallation failed. Please run manually: npm install -g mongodb-client-encryption");
+  }
+  process.exit(0);
+}
+
+function isMissingEncryptionPackageError(error) {
+  return error?.code === "ERR_MODULE_NOT_FOUND"
+    || error?.name === "MongoMissingDependencyError"
+    || (typeof error?.message === "string" && error.message.includes("mongodb-client-encryption"));
+}
 
 const MASTER_KEY_BYTES = 96;
 const QE_DIRECTORY_NAME = "queryable-encryption";
@@ -197,13 +229,33 @@ async function createQeClients(state, encryptedFieldsMap = undefined) {
       encryptedFieldsMap
     }
   });
-  await qeClient.connect();
 
-  const clientEncryption = new ClientEncryption(regularClient, {
-    keyVaultNamespace,
-    keyVaultClient: regularClient,
-    kmsProviders
-  });
+  try {
+    await qeClient.connect();
+  } catch (error) {
+    await regularClient.close();
+    await qeClient.close();
+    if (isMissingEncryptionPackageError(error)) {
+      await promptAndInstallEncryptionPackage();
+    }
+    throw error;
+  }
+
+  let clientEncryption;
+  try {
+    clientEncryption = new ClientEncryption(regularClient, {
+      keyVaultNamespace,
+      keyVaultClient: regularClient,
+      kmsProviders
+    });
+  } catch (error) {
+    await regularClient.close();
+    await qeClient.close();
+    if (isMissingEncryptionPackageError(error)) {
+      await promptAndInstallEncryptionPackage();
+    }
+    throw error;
+  }
 
   return {
     regularClient,
