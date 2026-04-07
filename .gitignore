@@ -1,2 +1,4 @@
 node_modules/
 mongocryptd.pid
+test-qe.mjs
+.claude/settings.local.json

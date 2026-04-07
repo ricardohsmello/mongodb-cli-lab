@@ -37,6 +37,92 @@ function isMissingEncryptionPackageError(error) {
     || (typeof error?.message === "string" && error.message.includes("mongodb-client-encryption"));
 }
 
+function getCryptSharedLibName() {
+  if (process.platform === "win32") return "mongo_crypt_v1.dll";
+  if (process.platform === "darwin") return "mongo_crypt_v1.dylib";
+  return "mongo_crypt_v1.so";
+}
+
+function getCryptSharedDownloadUrl(fullVersion) {
+  const { platform, arch } = process;
+  if (platform === "win32") {
+    return `https://downloads.mongodb.com/windows/mongo_crypt_shared_v1-windows-x86_64-enterprise-${fullVersion}.zip`;
+  }
+  if (platform === "darwin") {
+    const archStr = arch === "arm64" ? "arm64" : "x86_64";
+    return `https://downloads.mongodb.com/osx/mongo_crypt_shared_v1-macos-${archStr}-enterprise-${fullVersion}.tgz`;
+  }
+  const archStr = arch === "arm64" ? "aarch64" : "x86_64";
+  return `https://downloads.mongodb.com/linux/mongo_crypt_shared_v1-rhel80-${archStr}-enterprise-${fullVersion}.tgz`;
+}
+
+async function findFileRecursive(dir, filename) {
+  const entries = await fs.readdir(dir, { withFileTypes: true });
+  for (const entry of entries) {
+    const fullPath = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      const found = await findFileRecursive(fullPath, filename);
+      if (found) return found;
+    } else if (entry.name === filename) {
+      return fullPath;
+    }
+  }
+  return null;
+}
+
+async function ensureCryptSharedLib(state, client) {
+  const libFileName = getCryptSharedLibName();
+  const libPath = path.join(getQeDirectory(state), libFileName);
+
+  if (existsSync(libPath)) {
+    return libPath;
+  }
+
+  let fullVersion = state?.config?.mongodbVersion ?? "8.2";
+  if (client) {
+    try {
+      const buildInfo = await client.db("admin").command({ buildInfo: 1 });
+      fullVersion = buildInfo.version;
+    } catch {}
+  }
+
+  const isWindows = process.platform === "win32";
+  const archiveExt = isWindows ? ".zip" : ".tgz";
+  const downloadUrl = getCryptSharedDownloadUrl(fullVersion);
+  const archivePath = path.join(getQeDirectory(state), `crypt_shared${archiveExt}`);
+  const extractDir = path.join(getQeDirectory(state), "crypt_shared_extract");
+
+  await ensureQeDirectory(state);
+  console.log(`\nDownloading MongoDB crypt_shared library for MongoDB ${fullVersion}...`);
+
+  const response = await fetch(downloadUrl);
+  if (!response.ok) {
+    throw new Error(`Failed to download crypt_shared library (HTTP ${response.status}). URL: ${downloadUrl}`);
+  }
+
+  const buffer = await response.arrayBuffer();
+  await fs.writeFile(archivePath, Buffer.from(buffer));
+
+  await fs.mkdir(extractDir, { recursive: true });
+  if (isWindows) {
+    execSync(`powershell -command "Expand-Archive -Path '${archivePath}' -DestinationPath '${extractDir}' -Force"`, { stdio: "pipe" });
+  } else {
+    execSync(`tar -xzf "${archivePath}" -C "${extractDir}"`, { stdio: "pipe" });
+  }
+
+  const foundPath = await findFileRecursive(extractDir, libFileName);
+  if (!foundPath) {
+    throw new Error(`Could not find ${libFileName} in the downloaded archive.`);
+  }
+
+  await fs.copyFile(foundPath, libPath);
+  await fs.rm(archivePath, { force: true });
+  await fs.rm(extractDir, { recursive: true, force: true });
+
+  console.log("crypt_shared library ready.\n");
+  return libPath;
+}
+
 const MASTER_KEY_BYTES = 96;
 const QE_DIRECTORY_NAME = "queryable-encryption";
 const QE_STATE_FILE_NAME = "state.json";
@@ -222,19 +308,24 @@ async function createQeClients(state, encryptedFieldsMap = undefined) {
   const regularClient = new MongoClient(uri);
   await regularClient.connect();
 
-  const qeClient = new MongoClient(uri, {
-    autoEncryption: {
-      keyVaultNamespace,
-      kmsProviders,
-      encryptedFieldsMap
-    }
-  });
+  const cryptSharedLibPath = await ensureCryptSharedLib(state, regularClient);
 
+  let qeClient;
   try {
+    qeClient = new MongoClient(uri, {
+      autoEncryption: {
+        keyVaultNamespace,
+        kmsProviders,
+        encryptedFieldsMap,
+        extraOptions: {
+          cryptSharedLibPath
+        }
+      }
+    });
     await qeClient.connect();
   } catch (error) {
     await regularClient.close();
-    await qeClient.close();
+    await qeClient?.close();
     if (isMissingEncryptionPackageError(error)) {
       await promptAndInstallEncryptionPackage();
     }
@@ -262,7 +353,8 @@ async function createQeClients(state, encryptedFieldsMap = undefined) {
     qeClient,
     clientEncryption,
     keyVaultNamespace,
-    uri
+    uri,
+    cryptSharedLibPath
   };
 }
 
@@ -280,7 +372,10 @@ async function recreateQeClient(state, clients, encryptedFieldsMap) {
           key: localMasterKey
         }
       },
-      encryptedFieldsMap
+      encryptedFieldsMap,
+      extraOptions: {
+        cryptSharedLibPath: clients.cryptSharedLibPath
+      }
     }
   });
   await clients.qeClient.connect();
