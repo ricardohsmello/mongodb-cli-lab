@@ -8,7 +8,7 @@
 
 Website: [mongodb-cli-lab.vercel.app](https://mongodb-cli-lab.vercel.app/)
 
-<img src="./demo.gif" />
+![Demo](https://raw.githubusercontent.com/ricardohsmello/mongodb-cli-lab/main/demo.gif)
 
 **Disclaimer**
 
