@@ -8,6 +8,8 @@
 
 Website: [mongodb-cli-lab.vercel.app](https://mongodb-cli-lab.vercel.app/)
 
+<img src="./demo.gif" />
+
 **Disclaimer**
 
 This is an independent project and is **not an official MongoDB product**. It is intended for local development, demos, testing, and learning purposes only.
