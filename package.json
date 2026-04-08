@@ -1,7 +1,27 @@
 {
   "name": "@ricardohsmello/mongodb-cli-lab",
-  "version": "2.1.5",
+  "version": "2.1.6",
   "description": "CLI to create a local MongoDB sharded cluster using Docker",
+  "keywords": [
+    "mongodb",
+    "mongo",
+    "cli",
+    "replica-set",
+    "sharded-cluster",
+    "queryable-encryption",
+    "mongodb-search",
+    "vector-search",
+    "full-text-search",
+    "local-development"
+  ],
+  "homepage": "https://mongodb-cli-lab.vercel.app/",
+  "bugs": {
+    "url": "https://github.com/ricardohsmello/mongodb-cli-lab/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ricardohsmello/mongodb-cli-lab.git"
+  },
   "bin": {
     "mongodb-cli-lab": "./src/cli.js"
   },
