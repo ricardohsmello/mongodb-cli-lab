@@ -2,3 +2,9 @@ node_modules/
 mongocryptd.pid
 test-qe.mjs
 .claude/settings.local.json
+
+# Generated lab runtime data (contains pwfile, configs, sample data)
+mongodb-cli-lab/
+mongodb-search-lab/
+sampledata.archive
+*.archive
