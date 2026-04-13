@@ -240,6 +240,14 @@ function createSearchComposeFile(config) {
     image: ${config.mongotImage}
     networks:
       - ${config.networkName}
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        cp /mongot-community/pwfile /tmp/pwfile &&
+        chmod 600 /tmp/pwfile &&
+        sed 's|/mongot-community/pwfile|/tmp/pwfile|g' /mongot-community/config.default.yml > /tmp/mongot-config.yml &&
+        exec /mongot-community/mongot --config /tmp/mongot-config.yml
     volumes:
       - "mongot_data:/data/mongot"
       - "${path.join(config.storagePath, "mongot.conf")}:/mongot-community/config.default.yml:ro"

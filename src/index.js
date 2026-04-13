@@ -36,6 +36,11 @@ const SEARCH_SERVICE_NAME = "search-mongod";
 const MONGOT_SERVICE_NAME = "search-mongot";
 const SEARCH_REPLICA_SET = "searchRs";
 const SEARCH_PASSWORD = "mongotPassword";
+const MONGOT_ENTRYPOINT = [
+  "/bin/sh",
+  "-c",
+  "cp /mongot-community/pwfile /tmp/pwfile && chmod 600 /tmp/pwfile && sed 's|/mongot-community/pwfile|/tmp/pwfile|g' /mongot-community/config.default.yml > /tmp/mongot-config.yml && exec /mongot-community/mongot --config /tmp/mongot-config.yml"
+];
 const STATE_FILE_NAME = ".mongodb-cli-lab-state.json";
 const GLOBAL_STATE_DIR = path.join(os.homedir(), ".mongodb-cli-lab");
 let dockerComposeCommand = null;
@@ -369,9 +374,18 @@ function serviceToYaml(service) {
     }
   }
 
-  lines.push(indent(2, "command:"));
-  for (const part of service.command) {
-    lines.push(indent(3, `- "${String(part).replaceAll('"', '\\"')}"`));
+  if (service.entrypoint?.length) {
+    lines.push(indent(2, "entrypoint:"));
+    for (const part of service.entrypoint) {
+      lines.push(indent(3, `- ${yamlQuote(part)}`));
+    }
+  }
+
+  if (service.command?.length) {
+    lines.push(indent(2, "command:"));
+    for (const part of service.command) {
+      lines.push(indent(3, `- "${String(part).replaceAll('"', '\\"')}"`));
+    }
   }
 
   if (service.ports?.length) {
@@ -423,7 +437,7 @@ function generateComposeFile(config, topology) {
           containerName: topology.search.mongotServiceName,
           image: SEARCH_MONGOT_IMAGE,
           dependsOn: [topology.standalone.serviceName],
-          command: ["mongot", "--config", "/mongot-community/config.default.yml"],
+          entrypoint: MONGOT_ENTRYPOINT,
           ports: [`${topology.search.mongotPort}:27028`, `${topology.search.metricsPort}:9946`],
           volumes: [
             `${topology.search.mongotDataPath}:/data/mongot`,
@@ -472,7 +486,7 @@ function generateComposeFile(config, topology) {
           containerName: topology.search.mongotServiceName,
           image: SEARCH_MONGOT_IMAGE,
           dependsOn: [topology.search.seedServiceName],
-          command: ["mongot", "--config", "/mongot-community/config.default.yml"],
+          entrypoint: MONGOT_ENTRYPOINT,
           ports: [`${topology.search.mongotPort}:27028`, `${topology.search.metricsPort}:9946`],
           volumes: [
             `${topology.search.mongotDataPath}:/data/mongot`,
@@ -573,11 +587,7 @@ function generateComposeFile(config, topology) {
         containerName: topology.search.mongotServiceName,
         image: SEARCH_MONGOT_IMAGE,
         dependsOn: [topology.search.mongodServiceName],
-        command: [
-          "mongot",
-          "--config",
-          "/mongot-community/config.default.yml"
-        ],
+        entrypoint: MONGOT_ENTRYPOINT,
         ports: [
           `${topology.search.mongotPort}:27028`,
           `${topology.search.metricsPort}:9946`
