@@ -318,7 +318,7 @@ export default function Page() {
   const [npmVersion, setNpmVersion]     = useState<string>("...");
 
   useEffect(() => {
-    fetch("https://api.npmjs.org/downloads/point/2000-01-01:2099-12-31/@ricardohsmello%2Fmongodb-cli-lab")
+    fetch("https://api.npmjs.org/downloads/point/last-week/@ricardohsmello%2Fmongodb-cli-lab")
       .then((r) => r.json())
       .then((data) => {
         const n: number = data.downloads ?? 0;
@@ -552,7 +552,7 @@ export default function Page() {
               {/* Stats */}
               <div className="flex gap-6 justify-center lg:justify-start">
                 {[
-                  { label: "total downloads", value: npmDownloads },
+                  { label: "weekly downloads", value: npmDownloads },
                   { label: "GitHub stars", value: githubStars },
                   { label: "labs available", value: "3" },
                 ].map((s) => (
